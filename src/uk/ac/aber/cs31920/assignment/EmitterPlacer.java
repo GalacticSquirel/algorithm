@@ -383,6 +383,13 @@ public final class EmitterPlacer {
             if (gainBound(children, i, left) < deficit) {
                 break;
             }
+            // Every node forbidden so far stays empty in this branch. If the
+            // parasites cannot be served even with every other free node
+            // allowed to send pulses, neither this branch nor any later one
+            // (which forbid even more) can work.
+            if (i > 0 && !coverableWithout(forbidden)) {
+                break;
+            }
             int v = children.get(i)[0];
             PulseNetwork next = network.copy();
             next.addEmitter(v);
@@ -403,6 +410,23 @@ public final class EmitterPlacer {
             forbidden[v] = false;
         }
         return found;
+    }
+
+    /**
+     * Relaxation check: can all demand be met if every free node that is not
+     * forbidden may send pulses (and still let others pass)? Any placement
+     * that avoids the forbidden nodes gives a flow in this relaxed network,
+     * so if its maximum flow is below the total demand, no such placement
+     * exists. Costs one maximum flow (Dinitz, 28 Oct, slides 229-234).
+     */
+    private boolean coverableWithout(boolean[] forbidden) {
+        PulseNetwork relaxed = new PulseNetwork(instance);
+        for (int v = 0; v < grid.nodeCount(); v++) {
+            if (!instance.hasParasite(v) && !forbidden[v]) {
+                relaxed.openRelaxedSource(v);
+            }
+        }
+        return relaxed.maximiseRelaxed() >= instance.totalDemand();
     }
 
     /**

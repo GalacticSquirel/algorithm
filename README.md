@@ -26,7 +26,9 @@ Only the Java Collections Framework is used.
 | `Grid` | Triangle mesh: node numbering, coordinates, neighbours |
 | `FlowNetwork` | Dinitz max flow, plus Ford-Fulkerson searches from one changed arc and an undo log |
 | `PulseNetwork` | Node-split flow network that checks a set of emitters |
-| `EmitterPlacer` | No-solution test, forced emitters, lower bound, greedy, local search, branch and bound |
+| `EmitterPlacer` | No-solution test, forced emitters, lower bounds, greedy, local search, branch and bound |
+| `RelocationSearch` | Iterated local search for a placement with one emitter fewer |
+| `RegionBound` | Lower bound from small regions that must hold an emitter |
 
 1. **No-solution test (exact).** The instance is solvable exactly when every
    parasite's demand is at most its number of parasite-free neighbours.
@@ -37,16 +39,27 @@ Only the Java Collections Framework is used.
    can exist (cut argument, 23 Oct slides 215-219), so Ford-Fulkerson (22 Oct slide
    203) searches from that emitter only. After removing one, paths can only end at
    the parasites that lost a pulse, so the search runs backwards from them.
-3. **Forced emitters and lower bound.** A free node next to two parasites whose
-   demand equals their free degree must be an emitter. The lower bound is the
-   forced emitters plus ceil(missing pulses / 8).
+3. **Forced emitters and lower bounds.** A free node next to two parasites whose
+   demand equals their free degree must be an emitter. The basic lower bound is the
+   forced emitters plus ceil(missing pulses / 8). Two stronger bounds are used when
+   the greedy answer does not meet it:
+   - the fewest candidates whose individual gains add up to the missing pulses
+     (valid because delivered pulses are a submodular function of the emitter set);
+   - region bound: a relaxed max flow, where every free node outside a small region
+     may send pulses, shows when that region must hold an emitter. Near crowded
+     corners and edges such a region has only low-degree nodes, so its emitter
+     wastes capacity.
 4. **Upper bound.** Greedy construction plus a local search that drops unneeded
    emitters (14 Oct slide 110). The greedy ranks candidates with a cheap local
    estimate (tried with an undo log, then rolled back) and checks only the best few
-   exactly.
+   exactly. An iterated local search (14 Oct slides 108, 110) then moves emitters
+   around to find a placement with one emitter fewer, as long as it can.
 5. **Branch and bound** (14 Oct slides 117-119), seeded with the greedy result. It
    branches only on nodes on the sink side of the minimum cut (max-flow min-cut,
-   23 Oct slides 215-219), which loses no solution. It always runs until the answer
+   23 Oct slides 215-219), which loses no solution. A branch is cut off when the
+   largest remaining individual gains cannot add up to the missing pulses, or when
+   the nodes ruled out so far leave too little room even in the relaxed network.
+   It always runs until the answer
    is proven minimal, as the brief requires. For experiments, `-Dbudget=1000` caps
    local search and branch and bound at 1000 ms per input; the best valid placement
    found so far is then printed, without a guarantee that it is minimal.
