@@ -13,8 +13,12 @@ import java.util.List;
  */
 public final class MySolution {
 
-    /** Time the improvement steps may spend on one input, in milliseconds. */
-    private static final long SEARCH_BUDGET_MILLIS = 1000;
+    /**
+     * Time the improvement steps may spend on one input, in milliseconds. The
+     * brief requires the fewest emitters, so there is no limit unless one is
+     * asked for with -Dbudget=milliseconds (only meant for experiments).
+     */
+    private static final long SEARCH_BUDGET_MILLIS = Long.getLong("budget", Long.MAX_VALUE);
 
     private MySolution() {
     }

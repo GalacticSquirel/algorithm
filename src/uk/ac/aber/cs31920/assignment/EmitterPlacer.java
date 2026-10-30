@@ -39,9 +39,11 @@ import java.util.List;
  * Every candidate set is checked with the maximum flow in PulseNetwork, so any
  * placement this class returns is guaranteed to work.
  *
- * The search is exponential in the worst case, so it runs against a time
- * budget. If the budget runs out the best placement found so far is returned;
- * it is then valid but not proven optimal.
+ * The brief asks for the smallest possible number of emitters, so by default
+ * the search runs until the answer is proven optimal, however long that takes
+ * (it is exponential in the worst case). An optional time budget can be set
+ * for experiments; if it runs out, the best placement found so far is
+ * returned, which is valid but not proven optimal.
  */
 public final class EmitterPlacer {
 
@@ -64,7 +66,8 @@ public final class EmitterPlacer {
 
     /**
      * @param instance     the instance to solve
-     * @param budgetMillis time allowed for local search and branch and bound
+     * @param budgetMillis time allowed for local search and branch and bound,
+     *                     or Long.MAX_VALUE for no limit
      */
     public EmitterPlacer(Instance instance, long budgetMillis) {
         this.instance = instance;
@@ -96,7 +99,8 @@ public final class EmitterPlacer {
 
         List<Integer> greedy = greedy(start);
         // The time budget covers the improvement steps that follow.
-        deadline = System.currentTimeMillis() + budgetMillis;
+        long now = System.currentTimeMillis();
+        deadline = budgetMillis >= Long.MAX_VALUE - now ? Long.MAX_VALUE : now + budgetMillis;
         List<Integer> best = localSearch(greedy);
 
         // Branch and bound, seeded with the greedy result: keep asking for a

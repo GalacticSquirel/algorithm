@@ -46,9 +46,10 @@ Only the Java Collections Framework is used.
    exactly.
 5. **Branch and bound** (14 Oct slides 117-119), seeded with the greedy result. It
    branches only on nodes on the sink side of the minimum cut (max-flow min-cut,
-   23 Oct slides 215-219), which loses no solution. Local search and branch and
-   bound share a 1 second budget per input; if that runs out the best valid
-   placement found so far is printed.
+   23 Oct slides 215-219), which loses no solution. It always runs until the answer
+   is proven minimal, as the brief requires. For experiments, `-Dbudget=1000` caps
+   local search and branch and bound at 1000 ms per input; the best valid placement
+   found so far is then printed, without a guarantee that it is minimal.
 
 ## Complexity
 
