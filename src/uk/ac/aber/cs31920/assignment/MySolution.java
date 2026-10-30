@@ -1,0 +1,63 @@
+package uk.ac.aber.cs31920.assignment;
+
+import java.io.IOException;
+import java.util.List;
+
+/**
+ * Entry point. Every command line argument is an input file; for each one, in
+ * order, a single line is printed: the emitter coordinates as "x y x y ...",
+ * or "no solution" if the parasites cannot all be neutralised or the file
+ * cannot be read.
+ *
+ * Usage: java uk.ac.aber.cs31920.assignment.MySolution input01.txt input02.txt
+ */
+public final class MySolution {
+
+    /** Time the branch and bound search may spend on one input, in milliseconds. */
+    private static final long SEARCH_BUDGET_MILLIS = 1000;
+
+    private MySolution() {
+    }
+
+    public static void main(String[] args) {
+        boolean verbose = System.getProperty("verbose") != null;
+        for (String fileName : args) {
+            long start = System.nanoTime();
+            String line;
+            String note = "";
+            try {
+                Instance instance = Instance.read(fileName);
+                EmitterPlacer placer = new EmitterPlacer(instance, SEARCH_BUDGET_MILLIS);
+                List<Integer> emitters = placer.solve();
+                line = emitters == null ? "no solution" : format(instance.grid(), emitters);
+                if (verbose && emitters != null) {
+                    note = " [" + emitters.size() + " emitters, lower bound " + placer.lowerBound()
+                        + (placer.provenOptimal() ? ", optimal" : ", not proven optimal") + "]";
+                }
+            } catch (IOException | RuntimeException e) {
+                // A file that cannot be opened counts as having no solution.
+                line = "no solution";
+                if (verbose) {
+                    e.printStackTrace();
+                }
+            }
+            System.out.println(line);
+            if (verbose) {
+                long millis = (System.nanoTime() - start) / 1_000_000;
+                System.err.println(fileName + ": " + millis + " ms" + note);
+            }
+        }
+    }
+
+    /** Formats the emitters as "x y x y ...". */
+    private static String format(Grid grid, List<Integer> emitters) {
+        StringBuilder out = new StringBuilder();
+        for (int v : emitters) {
+            if (out.length() > 0) {
+                out.append(' ');
+            }
+            out.append(grid.x(v)).append(' ').append(grid.y(v));
+        }
+        return out.toString();
+    }
+}
