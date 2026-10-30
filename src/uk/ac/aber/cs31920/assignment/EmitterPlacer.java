@@ -116,9 +116,6 @@ public final class EmitterPlacer {
             best = smaller;
         }
         if (best.size() > lower) {
-            lower = Math.max(lower, forced.size() + emittersNeededByGains(start));
-        }
-        if (best.size() > lower) {
             lower = Math.max(lower, new RegionBound(instance, maxEmitterPulses).lowerBound(forced));
         }
 
@@ -203,27 +200,6 @@ public final class EmitterPlacer {
             }
         }
         return result;
-    }
-
-    /**
-     * Stronger lower bound for the emitters still needed on top of the forced
-     * ones: the fewest candidates whose gains, added up, reach the deficit
-     * (valid by the submodularity argument in gainBound).
-     */
-    private int emittersNeededByGains(PulseNetwork network) {
-        List<int[]> gains = new ArrayList<>();
-        for (int v : rankedCandidates(network, network.residualReachToSink(), null, Integer.MAX_VALUE)) {
-            gains.add(new int[] {v, network.exactGain(v)});
-        }
-        gains.sort(Comparator.comparingInt((int[] c) -> -c[1]));
-        int deficit = network.deficit();
-        int sum = 0;
-        int count = 0;
-        while (sum < deficit && count < gains.size()) {
-            sum += gains.get(count)[1];
-            count++;
-        }
-        return count;
     }
 
     private int emittersNeeded(int pulses) {
@@ -361,26 +337,21 @@ public final class EmitterPlacer {
             return false;
         }
 
-        // Exact gain of every allowed candidate, best first. Candidates with
-        // gain 0 can never help in this subtree (see gainBound), so they are
-        // left out.
+        // Exact gain of every allowed candidate, best first.
         List<int[]> children = new ArrayList<>();
         for (int v : rankedCandidates(network, network.residualReachToSink(), forbidden, Integer.MAX_VALUE)) {
-            int gain = network.exactGain(v);
-            if (gain > 0) {
-                children.add(new int[] {v, gain});
-            }
+            children.add(new int[] {v, network.exactGain(v)});
         }
         children.sort(Comparator.comparingInt((int[] c) -> -c[1]));
 
         List<Integer> excluded = new ArrayList<>();
         boolean found = false;
         for (int i = 0; i < children.size(); i++) {
-            // In the branch of child i the earlier children are forbidden, so
-            // the most the remaining emitters can add is the sum of the left
-            // largest gains from i on. The gains are sorted, so once this
-            // falls short it falls short for every later child too.
-            if (gainBound(children, i, left) < deficit) {
+            // Bound: after child i, each of the other left - 1 emitters adds
+            // at most maxEmitterPulses (removing an emitter's own pulses from
+            // a flow leaves a valid flow for the rest). The gains are sorted,
+            // so once a child falls short every later child does too.
+            if (children.get(i)[1] + (left - 1) * maxEmitterPulses < deficit) {
                 break;
             }
             // Every node forbidden so far stays empty in this branch. If the
@@ -413,8 +384,9 @@ public final class EmitterPlacer {
     }
 
     /**
-     * Relaxation check: can all demand be met if every free node that is not
-     * forbidden may send pulses (and still let others pass)? Any placement
+     * Relaxation check (16 Oct, slides 148 and 153): can all demand be met if
+     * every free node that is not forbidden may send pulses (and still let
+     * others pass)? Any placement
      * that avoids the forbidden nodes gives a flow in this relaxed network,
      * so if its maximum flow is below the total demand, no such placement
      * exists. Costs one maximum flow (Dinitz, 28 Oct, slides 229-234).
@@ -427,31 +399,6 @@ public final class EmitterPlacer {
             }
         }
         return relaxed.maximiseRelaxed() >= instance.totalDemand();
-    }
-
-    /**
-     * Sum of the gains of children from, from+1, ..., from+count-1 (as many
-     * as exist). This bounds what count more emitters can add, because the
-     * number of pulses delivered is a submodular function of the emitter set:
-     * an emitter never gains more by being added later, after other emitters,
-     * than it would gain now. So for any set T of new emitters,
-     * delivered(S + T) - delivered(S) <= sum over t in T of the gain of t now.
-     *
-     * Why it is submodular: give each emitter one "copy" vertex per incident
-     * edge, joined only to the node at the other end of that edge. Then the
-     * pulses are exactly vertex-disjoint paths from the chosen copies to the
-     * parasites (a path that passes through another emitter can be cut short
-     * to start at that emitter's unused copy), and the most such paths from a
-     * set of start vertices is the rank function of a gammoid, a matroid, and
-     * matroid rank functions are submodular. This is outside the module's
-     * slides, so it was also checked on 86,000 random cases with no exception.
-     */
-    private static int gainBound(List<int[]> children, int from, int count) {
-        int sum = 0;
-        for (int j = from; j < Math.min(children.size(), from + count); j++) {
-            sum += children.get(j)[1];
-        }
-        return sum;
     }
 
     /**

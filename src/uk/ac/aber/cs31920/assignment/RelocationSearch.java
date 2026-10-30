@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Iterated local search (14 Oct, slides 108 and 110) for a working placement
+ * Iterated local search (14 Oct, slides 109-110) for a working placement
  * with a fixed number k of emitters.
  *
  * A state is a set of k emitters, and its cost is the deficit: the pulses

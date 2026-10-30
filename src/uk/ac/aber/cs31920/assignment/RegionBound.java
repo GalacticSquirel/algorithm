@@ -9,7 +9,10 @@ import java.util.List;
  * emitter.
  *
  * Take a set R of free nodes and allow every free node outside R to be a
- * source (while still letting pulses pass through it). This relaxed network
+ * source (while still letting pulses pass through it). This is a relaxation
+ * (16 Oct, slides 148 and 153: drop a restriction, and the relaxed optimum
+ * bounds the real one), used as the lower bound module of branch and bound
+ * (14 Oct, slide 117). The relaxed network
  * allows at least every flow of every placement with no emitter in R. If its
  * maximum flow is below the total demand, then every working placement has an
  * emitter in R. Such an emitter sends at most cap(R) pulses, the largest
