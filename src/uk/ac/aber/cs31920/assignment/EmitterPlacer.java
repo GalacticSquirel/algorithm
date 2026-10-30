@@ -386,10 +386,9 @@ public final class EmitterPlacer {
     /**
      * Relaxation check (16 Oct, slides 148 and 153): can all demand be met if
      * every free node that is not forbidden may send pulses (and still let
-     * others pass)? Any placement
-     * that avoids the forbidden nodes gives a flow in this relaxed network,
-     * so if its maximum flow is below the total demand, no such placement
-     * exists. Costs one maximum flow (Dinitz, 28 Oct, slides 229-234).
+     * others pass)? Any placement that avoids the forbidden nodes gives a
+     * flow in this relaxed network, so if its maximum flow is below the total
+     * demand, no such placement exists. Costs one maximum flow (Dinitz, 28 Oct, slides 229-234).
      */
     private boolean coverableWithout(boolean[] forbidden) {
         PulseNetwork relaxed = new PulseNetwork(instance);
