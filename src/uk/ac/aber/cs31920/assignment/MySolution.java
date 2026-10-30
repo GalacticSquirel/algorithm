@@ -13,7 +13,7 @@ import java.util.List;
  */
 public final class MySolution {
 
-    /** Time the branch and bound search may spend on one input, in milliseconds. */
+    /** Time the improvement steps may spend on one input, in milliseconds. */
     private static final long SEARCH_BUDGET_MILLIS = 1000;
 
     private MySolution() {

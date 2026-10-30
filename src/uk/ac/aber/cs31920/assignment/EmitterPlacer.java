@@ -1,6 +1,8 @@
 package uk.ac.aber.cs31920.assignment;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -21,7 +23,8 @@ import java.util.List;
  *    emitter in every solution (see forcedEmitters). One emitter sends at most
  *    degree(v) <= 8 pulses, which gives the lower bound (see lowerBound).
  * 3. Upper bound: starting from the forced emitters, a greedy construction
- *    keeps adding the emitter that delivers the most extra pulses, followed
+ *    keeps adding the emitter that delivers the most extra pulses (ranked
+ *    with a quick local estimate, then added exactly), followed
  *    by a local search (14 Oct, slide 110) that removes emitters that are no
  *    longer needed.
  * 4. Branch and bound (14 Oct, slides 117-118), seeded with the greedy result
@@ -42,13 +45,18 @@ import java.util.List;
  */
 public final class EmitterPlacer {
 
-    /** Candidates evaluated with a full flow update per greedy step. */
+    /** Candidates estimated per greedy step. */
     private static final int GREEDY_CANDIDATES = 40;
+    /** Of those, how many of the best estimates are then checked exactly. */
+    private static final int EXACT_CHECKS = 4;
 
     private final Instance instance;
     private final Grid grid;
-    private final long deadline;
+    private final long budgetMillis;
+    private long deadline;
     private final int maxEmitterPulses;
+    /** parasiteDistance[v]: distance from v to the nearest parasite (for ordering only). */
+    private final int[] parasiteDistance;
     private boolean timedOut;
     private boolean provenOptimal;
     private List<Integer> forced = new ArrayList<>();
@@ -56,12 +64,12 @@ public final class EmitterPlacer {
 
     /**
      * @param instance     the instance to solve
-     * @param budgetMillis time allowed for the branch and bound search
+     * @param budgetMillis time allowed for local search and branch and bound
      */
     public EmitterPlacer(Instance instance, long budgetMillis) {
         this.instance = instance;
         this.grid = instance.grid();
-        this.deadline = System.currentTimeMillis() + budgetMillis;
+        this.budgetMillis = budgetMillis;
         int best = 0;
         for (int v = 0; v < grid.nodeCount(); v++) {
             if (!instance.hasParasite(v)) {
@@ -69,6 +77,7 @@ public final class EmitterPlacer {
             }
         }
         this.maxEmitterPulses = best;
+        this.parasiteDistance = distancesToParasites();
     }
 
     /**
@@ -85,7 +94,10 @@ public final class EmitterPlacer {
         lower = Math.max(emittersNeeded(instance.totalDemand()),
             forced.size() + emittersNeeded(start.deficit()));
 
-        List<Integer> best = localSearch(greedy(start));
+        List<Integer> greedy = greedy(start);
+        // The time budget covers the improvement steps that follow.
+        deadline = System.currentTimeMillis() + budgetMillis;
+        List<Integer> best = localSearch(greedy);
 
         // Branch and bound, seeded with the greedy result: keep asking for a
         // placement with one emitter fewer than the best so far. When a search
@@ -184,22 +196,36 @@ public final class EmitterPlacer {
         PulseNetwork network = start.copy();
         List<Integer> emitters = new ArrayList<>(forced);
         while (!network.isFeasible()) {
-            int before = network.delivered();
-            PulseNetwork bestNetwork = null;
-            int bestNode = -1;
-            for (int v : rankedCandidates(network, null, GREEDY_CANDIDATES)) {
-                PulseNetwork trial = network.copy();
-                trial.addEmitter(v);
-                if (bestNetwork == null || trial.delivered() > bestNetwork.delivered()) {
-                    bestNetwork = trial;
-                    bestNode = v;
-                    if (trial.delivered() - before == grid.degree(v)) {
-                        break; // cannot do better than every edge used
+            boolean[] reach = network.residualReachToSink();
+            List<int[]> estimates = new ArrayList<>();
+            int chosen = -1;
+            for (int v : rankedCandidates(network, reach, null, GREEDY_CANDIDATES)) {
+                // A quick estimate never overstates the gain, so an estimate
+                // that uses every edge of v is already the best possible.
+                int estimate = network.estimateGain(v, reach);
+                if (estimate == grid.degree(v)) {
+                    chosen = v;
+                    break;
+                }
+                estimates.add(new int[] {v, estimate});
+            }
+            if (chosen < 0) {
+                // Check the few best estimates exactly and keep the winner.
+                estimates.sort(Comparator.comparingInt((int[] e) -> -e[1]));
+                int bestGain = -1;
+                for (int i = 0; i < Math.min(EXACT_CHECKS, estimates.size()); i++) {
+                    int v = estimates.get(i)[0];
+                    PulseNetwork trial = network.copy();
+                    int gain = trial.addEmitter(v) - network.delivered();
+                    if (gain > bestGain) {
+                        bestGain = gain;
+                        chosen = v;
                     }
                 }
             }
-            network = bestNetwork;
-            emitters.add(bestNode);
+            // The chosen emitter is added exactly, so the flow stays maximum.
+            network.addEmitter(chosen);
+            emitters.add(chosen);
         }
         return emitters;
     }
@@ -211,17 +237,32 @@ public final class EmitterPlacer {
      */
     private List<Integer> localSearch(List<Integer> emitters) {
         List<Integer> current = new ArrayList<>(emitters);
+        if (current.size() == lower) {
+            return current; // already optimal, nothing to drop
+        }
+        // Build the network once and keep it in step with every change, so a
+        // pass costs one removal check per emitter.
+        PulseNetwork network = build(current);
         boolean improved = true;
         while (improved) {
             improved = false;
-            PulseNetwork network = build(current);
             for (int i = 0; i < current.size(); i++) {
+                if (System.currentTimeMillis() > deadline) {
+                    return current; // out of time; current is still valid
+                }
+                // Quick necessary condition: the others must have room for
+                // the pulses this emitter sends now.
+                int v = current.get(i);
+                if (network.spareCapacityWithout(v) < network.pulsesFrom(v)) {
+                    continue;
+                }
                 PulseNetwork trial = network.copy();
                 trial.removeEmitter(current.get(i));
                 if (trial.isFeasible()) {
+                    network = trial;
                     current.remove(i);
+                    i--;
                     improved = true;
-                    break;
                 }
             }
         }
@@ -278,7 +319,7 @@ public final class EmitterPlacer {
 
         // Evaluate every allowed child, then explore the best ones first.
         List<int[]> children = new ArrayList<>();
-        for (int v : rankedCandidates(network, forbidden, Integer.MAX_VALUE)) {
+        for (int v : rankedCandidates(network, network.residualReachToSink(), forbidden, Integer.MAX_VALUE)) {
             PulseNetwork trial = network.copy();
             trial.addEmitter(v);
             children.add(new int[] {v, trial.delivered()});
@@ -321,23 +362,21 @@ public final class EmitterPlacer {
      * promising come first: more edges that could carry a new pulse, then
      * closer to a parasite. Returns at most limit nodes.
      */
-    private List<Integer> rankedCandidates(PulseNetwork network, boolean[] forbidden, int limit) {
-        boolean[] useful = network.usefulNextEmitters();
-        boolean[] reach = network.residualReachToSink();
+    private List<Integer> rankedCandidates(PulseNetwork network, boolean[] reach, boolean[] forbidden,
+            int limit) {
+        boolean[] useful = network.usefulNextEmitters(reach);
         List<Integer> candidates = new ArrayList<>();
         int n = grid.nodeCount();
         int[] score = new int[n];
-        int[] distance = new int[n];
         for (int v = 0; v < n; v++) {
             if (useful[v] && (forbidden == null || !forbidden[v])) {
                 candidates.add(v);
                 score[v] = network.promisingEdges(v, reach);
-                distance[v] = nearestParasite(v);
             }
         }
         Collections.sort(candidates, Comparator
             .comparingInt((Integer v) -> -score[v])
-            .thenComparingInt(v -> distance[v])
+            .thenComparingInt(v -> parasiteDistance[v])
             .thenComparingInt(v -> v));
         if (candidates.size() > limit) {
             return new ArrayList<>(candidates.subList(0, limit));
@@ -345,11 +384,43 @@ public final class EmitterPlacer {
         return candidates;
     }
 
-    private int nearestParasite(int v) {
-        int best = Integer.MAX_VALUE;
+    /**
+     * Distance max(|dx|, |dy|) from every node to its nearest parasite, in
+     * coordinate units. Computed once by a breadth-first search from all
+     * parasites at once over the (2l+1) x (2l+1) coordinate square with king
+     * moves, which takes O(N) time, instead of comparing every candidate with
+     * every parasite in every search node (O(N * P) each time).
+     */
+    private int[] distancesToParasites() {
+        int size = 2 * grid.sideLength() + 1;
+        int[] square = new int[size * size];
+        Arrays.fill(square, Integer.MAX_VALUE);
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
         for (int p : instance.parasites()) {
-            best = Math.min(best, grid.distance(v, p));
+            int cell = grid.x(p) * size + grid.y(p);
+            square[cell] = 0;
+            queue.add(cell);
         }
-        return best;
+        while (!queue.isEmpty()) {
+            int cell = queue.poll();
+            int x = cell / size;
+            int y = cell % size;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    int nx = x + dx;
+                    int ny = y + dy;
+                    if (nx >= 0 && ny >= 0 && nx < size && ny < size
+                            && square[nx * size + ny] == Integer.MAX_VALUE) {
+                        square[nx * size + ny] = square[cell] + 1;
+                        queue.add(nx * size + ny);
+                    }
+                }
+            }
+        }
+        int[] distance = new int[grid.nodeCount()];
+        for (int v = 0; v < distance.length; v++) {
+            distance[v] = square[grid.x(v) * size + grid.y(v)];
+        }
+        return distance;
     }
 }

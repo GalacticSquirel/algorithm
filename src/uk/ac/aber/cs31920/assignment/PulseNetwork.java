@@ -31,7 +31,9 @@ package uk.ac.aber.cs31920.assignment;
  * if the maximum flow equals the total demand.
  *
  * Emitters can be added and removed while keeping the current flow, so the
- * search only pays for the few augmenting paths that change.
+ * search only pays for the few augmenting paths that change. A new emitter
+ * that no pulse ran through only needs paths that start at it, which are
+ * found by a local search around it (FlowNetwork.augmentFrom).
  */
 public final class PulseNetwork {
 
@@ -113,19 +115,64 @@ public final class PulseNetwork {
         if (isEmitter[v] || instance.hasParasite(v)) {
             throw new IllegalArgumentException("node is not free");
         }
-        if (network.flow(transitArc[v]) > 0) {
+        boolean rerouted = network.flow(transitArc[v]) > 0;
+        if (rerouted) {
             network.cancelOneUnit(transitArc[v]);
         }
         network.setCapacity(transitArc[v], 0);
         network.setCapacity(sourceArc[v], instance.grid().degree(v));
         isEmitter[v] = true;
         emitterCount++;
-        return network.maximise();
+        if (rerouted) {
+            // The cancelled pulse freed capacity elsewhere, so new paths may
+            // start at other emitters too: run the full algorithm.
+            return network.maximise();
+        }
+        // Otherwise every new pulse must come from v (see augmentFrom).
+        return network.augmentFrom(sourceArc[v]);
+    }
+
+    /**
+     * Estimates how many extra pulses an emitter on the free node v would
+     * deliver, without changing this network. The emitter is tried out with
+     * an undo log: a pulse running through v is cancelled, then only v and
+     * the emitter whose pulse was cancelled look for new paths, and only
+     * through network nodes marked in reach (the nodes that could reach the
+     * sink before; see residualReachToSink) or on the cancelled pulse's
+     * route. All changes are then rolled back, and reach is left as it was.
+     *
+     * The estimate is a valid flow, so it never overstates the gain, but it
+     * can understate it. It is used only to rank candidates in the greedy
+     * construction, never to prove anything. Its cost depends on the size of
+     * the reach region, not on the size of the grid.
+     */
+    public int estimateGain(int v, boolean[] reach) {
+        int before = network.value();
+        network.beginTrial();
+        int freed = -1;
+        int[] opened = new int[0];
+        if (network.flow(transitArc[v]) > 0) {
+            freed = network.cancelOneUnit(transitArc[v]);
+            // The cancelled pulse's route is free again, so allow it too.
+            opened = network.markTrialNodes(reach);
+        }
+        network.setCapacity(transitArc[v], 0);
+        network.setCapacity(sourceArc[v], instance.grid().degree(v));
+        network.augmentFrom(sourceArc[v], reach);
+        if (freed >= 0) {
+            network.augmentFrom(freed, reach);
+        }
+        int gain = network.value() - before;
+        network.rollback();
+        for (int w : opened) {
+            reach[w] = false;
+        }
+        return gain;
     }
 
     /**
      * Removes the emitter on v, cancelling its pulses, and recomputes the
-     * maximum flow.
+     * maximum flow. Only meant for a network whose flow was maximum before.
      *
      * @return the number of pulses delivered afterwards
      */
@@ -140,7 +187,39 @@ public final class PulseNetwork {
         network.setCapacity(transitArc[v], 1);
         isEmitter[v] = false;
         emitterCount--;
-        return network.maximise();
+        // Every augmenting path now has to end at a parasite that lost a
+        // pulse, since all others are still full. So search backwards from
+        // those parasites until a whole round finds nothing.
+        boolean progress = true;
+        while (progress) {
+            progress = false;
+            for (int p : instance.parasites()) {
+                if (network.flow(sinkArc[p]) < instance.demand(p) && network.augmentInto(sinkArc[p])) {
+                    progress = true;
+                }
+            }
+        }
+        return network.value();
+    }
+
+    /**
+     * Pulses the emitters other than v could still send: the most that
+     * removing v could ever be made up for.
+     */
+    public int spareCapacityWithout(int v) {
+        int spare = 0;
+        Grid grid = instance.grid();
+        for (int w = 0; w < grid.nodeCount(); w++) {
+            if (isEmitter[w] && w != v) {
+                spare += grid.degree(w) - network.flow(sourceArc[w]);
+            }
+        }
+        return spare;
+    }
+
+    /** Pulses sent by the emitter on v in the current flow. */
+    public int pulsesFrom(int v) {
+        return network.flow(sourceArc[v]);
     }
 
     /** The number of pulses the current emitters deliver (the maximum flow). */
@@ -182,9 +261,10 @@ public final class PulseNetwork {
      * and with it the flow, could not grow. Every set of extra emitters that
      * fixes the deficit must therefore contain at least one node marked here.
      * The branch and bound search uses this to branch only on these nodes.
+     *
+     * @param reach the result of residualReachToSink() for the current flow
      */
-    public boolean[] usefulNextEmitters() {
-        boolean[] reach = network.canReachSink();
+    public boolean[] usefulNextEmitters(boolean[] reach) {
         int n = instance.grid().nodeCount();
         boolean[] useful = new boolean[n];
         for (int v = 0; v < n; v++) {

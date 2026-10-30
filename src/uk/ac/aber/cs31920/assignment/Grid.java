@@ -118,16 +118,4 @@ public final class Grid {
     public int degree(int v) {
         return neighbours[v].length;
     }
-
-    /**
-     * Number of edges a pulse needs at least to get from u to w. Grid line edges
-     * cover two units of a coordinate and diagonals one unit of each, so this is
-     * a cheap estimate used only to order candidates; it is not needed for
-     * correctness.
-     */
-    public int distance(int u, int w) {
-        int dx = Math.abs(xOf[u] - xOf[w]);
-        int dy = Math.abs(yOf[u] - yOf[w]);
-        return Math.max(dx, dy);
-    }
 }
