@@ -439,6 +439,11 @@ public final class FlowNetwork {
         valueBeforeTrial = value;
     }
 
+    /** Keeps every change since beginTrial and stops recording. */
+    public void commit() {
+        trailSize = -1;
+    }
+
     /** Undoes every change since beginTrial and stops recording. */
     public void rollback() {
         for (int i = trailSize - 1; i >= 0; i--) {

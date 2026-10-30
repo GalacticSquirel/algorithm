@@ -133,6 +133,27 @@ public final class PulseNetwork {
     }
 
     /**
+     * Exactly how many extra pulses an emitter on the free node v would
+     * deliver, without changing this network: the emitter is added as in
+     * addEmitter with every change recorded in an undo log, and then the log
+     * is rolled back. This costs only the work of the augmenting searches,
+     * not a copy of the network.
+     */
+    public int exactGain(int v) {
+        int before = network.value();
+        network.beginTrial();
+        boolean rerouted = network.flow(transitArc[v]) > 0;
+        if (rerouted) {
+            network.cancelOneUnit(transitArc[v]);
+        }
+        network.setCapacity(transitArc[v], 0);
+        network.setCapacity(sourceArc[v], instance.grid().degree(v));
+        int after = rerouted ? network.maximise() : network.augmentFrom(sourceArc[v]);
+        network.rollback();
+        return after - before;
+    }
+
+    /**
      * Estimates how many extra pulses an emitter on the free node v would
      * deliver, without changing this network. The emitter is tried out with
      * an undo log: a pulse running through v is cancelled, then only v and
@@ -200,6 +221,46 @@ public final class PulseNetwork {
             }
         }
         return network.value();
+    }
+
+    // ----- Relaxed networks, used only for lower bounds (see RegionBound) -----
+
+    /**
+     * Lets the free node v act as a source of up to degree(v) pulses while it
+     * also stays available as a transit node. A network in which several
+     * nodes are opened like this is a relaxation: every real placement that
+     * only uses opened nodes as emitters has a flow that is also valid here.
+     * Call maximiseRelaxed afterwards (or augmentRelaxed for one node when
+     * the flow was already maximum).
+     */
+    public void openRelaxedSource(int v) {
+        network.setCapacity(sourceArc[v], instance.grid().degree(v));
+    }
+
+    /** Maximum flow of a relaxed network from scratch (Dinitz). */
+    public int maximiseRelaxed() {
+        return network.maximise();
+    }
+
+    /** Opens v and updates a maximum flow with paths that start at v only. */
+    public int augmentRelaxed(int v) {
+        openRelaxedSource(v);
+        return network.augmentFrom(sourceArc[v]);
+    }
+
+    /** Starts recording changes so that rollbackTrial can undo them. */
+    public void beginTrial() {
+        network.beginTrial();
+    }
+
+    /** Keeps every change since beginTrial. */
+    public void commitTrial() {
+        network.commit();
+    }
+
+    /** Undoes every change since beginTrial. */
+    public void rollbackTrial() {
+        network.rollback();
     }
 
     /**

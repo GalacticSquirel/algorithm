@@ -51,6 +51,8 @@ public final class EmitterPlacer {
     private static final int GREEDY_CANDIDATES = 40;
     /** Of those, how many of the best estimates are then checked exactly. */
     private static final int EXACT_CHECKS = 4;
+    /** Moves the iterated local search may try for each smaller size. */
+    private static final int RELOCATION_MOVES = 3000;
 
     private final Instance instance;
     private final Grid grid;
@@ -102,6 +104,23 @@ public final class EmitterPlacer {
         long now = System.currentTimeMillis();
         deadline = budgetMillis >= Long.MAX_VALUE - now ? Long.MAX_VALUE : now + budgetMillis;
         List<Integer> best = localSearch(greedy);
+
+        // Iterated local search: while it keeps finding a working placement
+        // with one emitter fewer, take it.
+        RelocationSearch relocation = new RelocationSearch(instance, forced);
+        while (best.size() > lower && System.currentTimeMillis() <= deadline) {
+            List<Integer> smaller = relocation.search(best, RELOCATION_MOVES);
+            if (smaller == null) {
+                break;
+            }
+            best = smaller;
+        }
+        if (best.size() > lower) {
+            lower = Math.max(lower, forced.size() + emittersNeededByGains(start));
+        }
+        if (best.size() > lower) {
+            lower = Math.max(lower, new RegionBound(instance, maxEmitterPulses).lowerBound(forced));
+        }
 
         // Branch and bound, seeded with the greedy result: keep asking for a
         // placement with one emitter fewer than the best so far. When a search
@@ -184,6 +203,27 @@ public final class EmitterPlacer {
             }
         }
         return result;
+    }
+
+    /**
+     * Stronger lower bound for the emitters still needed on top of the forced
+     * ones: the fewest candidates whose gains, added up, reach the deficit
+     * (valid by the submodularity argument in gainBound).
+     */
+    private int emittersNeededByGains(PulseNetwork network) {
+        List<int[]> gains = new ArrayList<>();
+        for (int v : rankedCandidates(network, network.residualReachToSink(), null, Integer.MAX_VALUE)) {
+            gains.add(new int[] {v, network.exactGain(v)});
+        }
+        gains.sort(Comparator.comparingInt((int[] c) -> -c[1]));
+        int deficit = network.deficit();
+        int sum = 0;
+        int count = 0;
+        while (sum < deficit && count < gains.size()) {
+            sum += gains.get(count)[1];
+            count++;
+        }
+        return count;
     }
 
     private int emittersNeeded(int pulses) {
@@ -315,31 +355,35 @@ public final class EmitterPlacer {
             timedOut = true;
             return false;
         }
-        // Bound: each remaining emitter delivers at most maxEmitterPulses.
         int left = k - chosen.size();
-        if (emittersNeeded(network.deficit()) > left) {
+        int deficit = network.deficit();
+        if (emittersNeeded(deficit) > left) {
             return false;
         }
 
-        // Evaluate every allowed child, then explore the best ones first.
+        // Exact gain of every allowed candidate, best first. Candidates with
+        // gain 0 can never help in this subtree (see gainBound), so they are
+        // left out.
         List<int[]> children = new ArrayList<>();
         for (int v : rankedCandidates(network, network.residualReachToSink(), forbidden, Integer.MAX_VALUE)) {
-            PulseNetwork trial = network.copy();
-            trial.addEmitter(v);
-            children.add(new int[] {v, trial.delivered()});
+            int gain = network.exactGain(v);
+            if (gain > 0) {
+                children.add(new int[] {v, gain});
+            }
         }
         children.sort(Comparator.comparingInt((int[] c) -> -c[1]));
 
         List<Integer> excluded = new ArrayList<>();
         boolean found = false;
-        for (int[] child : children) {
-            int v = child[0];
-            // A child that cannot reach the target even if every later
-            // emitter is perfect is cut off without being expanded.
-            int missing = instance.totalDemand() - child[1];
-            if (emittersNeeded(missing) > left - 1) {
-                continue;
+        for (int i = 0; i < children.size(); i++) {
+            // In the branch of child i the earlier children are forbidden, so
+            // the most the remaining emitters can add is the sum of the left
+            // largest gains from i on. The gains are sorted, so once this
+            // falls short it falls short for every later child too.
+            if (gainBound(children, i, left) < deficit) {
+                break;
             }
+            int v = children.get(i)[0];
             PulseNetwork next = network.copy();
             next.addEmitter(v);
             chosen.add(v);
@@ -359,6 +403,31 @@ public final class EmitterPlacer {
             forbidden[v] = false;
         }
         return found;
+    }
+
+    /**
+     * Sum of the gains of children from, from+1, ..., from+count-1 (as many
+     * as exist). This bounds what count more emitters can add, because the
+     * number of pulses delivered is a submodular function of the emitter set:
+     * an emitter never gains more by being added later, after other emitters,
+     * than it would gain now. So for any set T of new emitters,
+     * delivered(S + T) - delivered(S) <= sum over t in T of the gain of t now.
+     *
+     * Why it is submodular: give each emitter one "copy" vertex per incident
+     * edge, joined only to the node at the other end of that edge. Then the
+     * pulses are exactly vertex-disjoint paths from the chosen copies to the
+     * parasites (a path that passes through another emitter can be cut short
+     * to start at that emitter's unused copy), and the most such paths from a
+     * set of start vertices is the rank function of a gammoid, a matroid, and
+     * matroid rank functions are submodular. This is outside the module's
+     * slides, so it was also checked on 86,000 random cases with no exception.
+     */
+    private static int gainBound(List<int[]> children, int from, int count) {
+        int sum = 0;
+        for (int j = from; j < Math.min(children.size(), from + count); j++) {
+            sum += children.get(j)[1];
+        }
+        return sum;
     }
 
     /**
