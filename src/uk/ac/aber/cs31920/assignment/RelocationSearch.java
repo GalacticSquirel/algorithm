@@ -31,7 +31,9 @@ public final class RelocationSearch {
 
     private final Instance instance;
     private final Grid grid;
-    private final List<Integer> forced;
+    /** isForced[v] is true for the emitters that never move. */
+    private final boolean[] isForced;
+    /** State of the pseudo-random number generator (see nextInt). */
     private long seed = 0x2545F4914F6CDD1DL;
 
     /**
@@ -41,7 +43,10 @@ public final class RelocationSearch {
     public RelocationSearch(Instance instance, List<Integer> forced) {
         this.instance = instance;
         this.grid = instance.grid();
-        this.forced = forced;
+        this.isForced = new boolean[grid.nodeCount()];
+        for (int v : forced) {
+            isForced[v] = true;
+        }
     }
 
     /**
@@ -57,7 +62,7 @@ public final class RelocationSearch {
         // Drop the emitter that currently sends the fewest pulses.
         int weakest = -1;
         for (int v : start) {
-            if (!forced.contains(v) && (weakest < 0 || network.pulsesFrom(v) < network.pulsesFrom(weakest))) {
+            if (!isForced[v] && (weakest < 0 || network.pulsesFrom(v) < network.pulsesFrom(weakest))) {
                 weakest = v;
             }
         }
@@ -110,7 +115,7 @@ public final class RelocationSearch {
         int tries = 0;
         while (tries++ < 4 * current.size()) {
             int index = nextInt(current.size());
-            if (!forced.contains(current.get(index))) {
+            if (!isForced[current.get(index)]) {
                 return index;
             }
         }
@@ -160,6 +165,7 @@ public final class RelocationSearch {
         return count == 0 ? -1 : bestNodes[nextInt(count)];
     }
 
+    /** Builds the network with the given emitters placed. */
     private PulseNetwork build(List<Integer> emitters) {
         PulseNetwork network = new PulseNetwork(instance);
         for (int v : emitters) {

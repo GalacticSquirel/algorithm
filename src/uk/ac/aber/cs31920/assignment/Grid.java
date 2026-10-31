@@ -46,7 +46,7 @@ public final class Grid {
         xOf = new int[nodes];
         yOf = new int[nodes];
 
-        // Number the valid coordinate pairs row by row.
+        // Number the valid coordinate pairs in order of x, then y.
         int next = 0;
         for (int x = 0; x <= maxCoordinate; x++) {
             for (int y = 0; y <= maxCoordinate; y++) {
@@ -94,22 +94,27 @@ public final class Grid {
         return idAt[x][y];
     }
 
+    /** The number of nodes, (l+1)^2 + l^2. */
     public int nodeCount() {
         return xOf.length;
     }
 
+    /** The side length l. */
     public int sideLength() {
         return sideLength;
     }
 
+    /** The x coordinate of node v. */
     public int x(int v) {
         return xOf[v];
     }
 
+    /** The y coordinate of node v. */
     public int y(int v) {
         return yOf[v];
     }
 
+    /** The nodes adjacent to v. The array is shared, so callers must not change it. */
     public int[] neighbours(int v) {
         return neighbours[v];
     }

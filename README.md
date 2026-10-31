@@ -17,6 +17,10 @@ standard error.
 
 Only the Java Collections Framework is used.
 
+A file that cannot be opened, or is not in the input format (first line `l`, then
+`x y demand` lines), prints `no solution`. A grid with no parasites prints an empty
+line (zero emitters). If a node is listed twice, the later line counts.
+
 ## How it works
 
 | Class | Role |

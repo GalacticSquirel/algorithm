@@ -12,8 +12,8 @@ import java.util.List;
  * source (while still letting pulses pass through it). This is a relaxation
  * (16 Oct, slides 148 and 153: drop a restriction, and the relaxed optimum
  * bounds the real one), used as the lower bound module of branch and bound
- * (14 Oct, slide 117). The relaxed network
- * allows at least every flow of every placement with no emitter in R. If its
+ * (14 Oct, slide 117). The relaxed network allows at least every flow of
+ * every placement with no emitter in R. If its
  * maximum flow is below the total demand, then every working placement has an
  * emitter in R. Such an emitter sends at most cap(R) pulses, the largest
  * degree in R.
@@ -42,6 +42,10 @@ public final class RegionBound {
     private final Grid grid;
     private final int maxEmitterPulses;
 
+    /**
+     * @param instance         the instance
+     * @param maxEmitterPulses the most pulses one emitter can send
+     */
     public RegionBound(Instance instance, int maxEmitterPulses) {
         this.instance = instance;
         this.grid = instance.grid();
@@ -105,6 +109,7 @@ public final class RegionBound {
         return count + (rest + maxEmitterPulses - 1) / maxEmitterPulses;
     }
 
+    /** The largest degree among the nodes: the most one emitter there can send. */
     private int capacity(List<Integer> nodes) {
         int best = 0;
         for (int v : nodes) {

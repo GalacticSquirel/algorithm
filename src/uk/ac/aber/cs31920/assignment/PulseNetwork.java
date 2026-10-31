@@ -45,7 +45,6 @@ public final class PulseNetwork {
     private final int[] sinkArc;
     /** isEmitter[v] is true when v holds an emitter in this network. */
     private final boolean[] isEmitter;
-    private int emitterCount;
 
     /** Builds the network for the instance with no emitters placed yet. */
     public PulseNetwork(Instance instance) {
@@ -88,9 +87,9 @@ public final class PulseNetwork {
         sourceArc = other.sourceArc;
         sinkArc = other.sinkArc;
         isEmitter = other.isEmitter.clone();
-        emitterCount = other.emitterCount;
     }
 
+    /** An independent copy with the same emitters and flow. */
     public PulseNetwork copy() {
         return new PulseNetwork(this);
     }
@@ -112,17 +111,21 @@ public final class PulseNetwork {
      * @return the number of pulses delivered afterwards
      */
     public int addEmitter(int v) {
-        if (isEmitter[v] || instance.hasParasite(v)) {
+        if (!isFree(v)) {
             throw new IllegalArgumentException("node is not free");
         }
+        isEmitter[v] = true;
+        return placeAndMaximise(v);
+    }
+
+    /** Turns v into a source in the flow network and restores a maximum flow. */
+    private int placeAndMaximise(int v) {
         boolean rerouted = network.flow(transitArc[v]) > 0;
         if (rerouted) {
             network.cancelOneUnit(transitArc[v]);
         }
         network.setCapacity(transitArc[v], 0);
         network.setCapacity(sourceArc[v], instance.grid().degree(v));
-        isEmitter[v] = true;
-        emitterCount++;
         if (rerouted) {
             // The cancelled pulse freed capacity elsewhere, so new paths may
             // start at other emitters too: run the full algorithm.
@@ -142,13 +145,7 @@ public final class PulseNetwork {
     public int exactGain(int v) {
         int before = network.value();
         network.beginTrial();
-        boolean rerouted = network.flow(transitArc[v]) > 0;
-        if (rerouted) {
-            network.cancelOneUnit(transitArc[v]);
-        }
-        network.setCapacity(transitArc[v], 0);
-        network.setCapacity(sourceArc[v], instance.grid().degree(v));
-        int after = rerouted ? network.maximise() : network.augmentFrom(sourceArc[v]);
+        int after = placeAndMaximise(v);
         network.rollback();
         return after - before;
     }
@@ -207,7 +204,6 @@ public final class PulseNetwork {
         network.setCapacity(sourceArc[v], 0);
         network.setCapacity(transitArc[v], 1);
         isEmitter[v] = false;
-        emitterCount--;
         // Every augmenting path now has to end at a parasite that lost a
         // pulse, since all others are still full. So search backwards from
         // those parasites until a whole round finds nothing.
@@ -283,26 +279,14 @@ public final class PulseNetwork {
         return network.flow(sourceArc[v]);
     }
 
-    /** The number of pulses the current emitters deliver (the maximum flow). */
-    public int delivered() {
-        return network.value();
-    }
-
     /** Pulses still missing to neutralise every parasite. */
     public int deficit() {
         return instance.totalDemand() - network.value();
     }
 
+    /** True if the emitters neutralise every parasite. */
     public boolean isFeasible() {
         return deficit() == 0;
-    }
-
-    public boolean isEmitter(int v) {
-        return isEmitter[v];
-    }
-
-    public int emitterCount() {
-        return emitterCount;
     }
 
     /** True if v holds neither a parasite nor an emitter. */

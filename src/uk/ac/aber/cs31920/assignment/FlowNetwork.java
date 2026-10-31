@@ -22,8 +22,8 @@ import java.util.Arrays;
  * units of flow are still missing. Taking d = sqrt(n) shows there are only
  * O(sqrt(n)) phases. A blocking flow takes O(e) time in such a network,
  * because a path saturates its unit arcs and each arc is then dropped. The
- * total
- * is O(sqrt(n) * e) instead of O(|f| * e).
+ * total is O(sqrt(n) * e) instead of O(|f| * e). (This sharper bound is not
+ * on the slides; it is the standard argument for unit networks, adapted.)
  *
  * Every arc a is stored together with its reverse arc a ^ 1 (forward arcs have
  * even numbers). The reverse arc has capacity 0 and always carries minus the
@@ -42,25 +42,26 @@ public final class FlowNetwork {
     private final int sink;
 
     // Topology, shared between copies.
-    private int[] head;
-    private int[] next;
-    private int[] to;
+    private final int[] head;
+    private final int[] next;
+    private final int[] to;
     private int arcCount;
 
     // State, cloned by copies.
-    private int[] cap;
-    private int[] flow;
+    private final int[] cap;
+    private final int[] flow;
     private int value;
 
     // Scratch space for the searches, shared between copies (the program is
     // single threaded, so only one network searches at a time).
-    private int[] level;
-    private int[] currentArc;
-    private int[] pathArc;
-    private int[] queue;
-    private int[] parentArc;
-    private int[] visitMark;
-    private int[] visitStamp;
+    private final int[] level;
+    private final int[] currentArc;
+    private final int[] pathArc;
+    private final int[] queue;
+    private final int[] parentArc;
+    private final int[] visitMark;
+    /** One counter in an array so that copies share it with visitMark. */
+    private final int[] visitStamp;
 
     // Undo log for trial changes (see beginTrial / rollback). An entry
     // (arc, amount) undoes a push; an entry (~arc, old) undoes a capacity change.
@@ -117,6 +118,7 @@ public final class FlowNetwork {
         visitStamp = other.visitStamp;
     }
 
+    /** A copy that can change its capacities and flow independently. */
     public FlowNetwork copy() {
         return new FlowNetwork(this);
     }
@@ -140,10 +142,12 @@ public final class FlowNetwork {
         head[u] = a;
     }
 
+    /** The value of the current flow. */
     public int value() {
         return value;
     }
 
+    /** The flow on the given arc. */
     public int flow(int arc) {
         return flow[arc];
     }
@@ -309,7 +313,8 @@ public final class FlowNetwork {
             if (!found) {
                 break;
             }
-            // Every arc between grid nodes has capacity 1, so push one unit.
+            // Arcs between grid nodes have capacity 1, so one unit is the
+            // bottleneck of the path.
             for (int v = sink; v != start; v = to[parentArc[v] ^ 1]) {
                 push(parentArc[v], 1);
             }
@@ -432,9 +437,12 @@ public final class FlowNetwork {
     /**
      * Starts recording changes so that rollback can undo them. Trying out a
      * candidate emitter then costs only as much as the paths it changes,
-     * instead of O(e) for copying the whole network.
+     * instead of O(e) for copying the whole network. Trials cannot be nested.
      */
     public void beginTrial() {
+        if (trailSize >= 0) {
+            throw new IllegalStateException("a trial is already running");
+        }
         trailSize = 0;
         valueBeforeTrial = value;
     }

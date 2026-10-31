@@ -35,15 +35,20 @@ public final class MySolution {
                 List<Integer> emitters = placer.solve();
                 line = emitters == null ? "no solution" : format(instance.grid(), emitters);
                 if (verbose && emitters != null) {
-                    note = " [" + emitters.size() + " emitters, lower bound " + placer.lowerBound()
+                    note = " [" + emitters.size() + " emitter(s), lower bound " + placer.lowerBound()
                         + (placer.provenOptimal() ? ", optimal" : ", not proven optimal") + "]";
                 }
-            } catch (IOException | RuntimeException e) {
-                // A file that cannot be opened counts as having no solution.
+            } catch (IOException e) {
+                // A file that cannot be opened or read counts as having no solution.
                 line = "no solution";
                 if (verbose) {
-                    e.printStackTrace();
+                    System.err.println(fileName + ": " + e.getMessage());
                 }
+            } catch (RuntimeException e) {
+                // Should never happen. Report it on standard error, so that it
+                // is not hidden, and still answer every remaining file.
+                line = "no solution";
+                e.printStackTrace();
             }
             System.out.println(line);
             if (verbose) {

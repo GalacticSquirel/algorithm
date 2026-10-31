@@ -24,14 +24,19 @@ import java.util.List;
  *    degree(v) <= 8 pulses, which gives the lower bound (see lowerBound).
  * 3. Upper bound: starting from the forced emitters, a greedy construction
  *    keeps adding the emitter that delivers the most extra pulses (ranked
- *    with a quick local estimate, then added exactly), followed
- *    by a local search (14 Oct, slide 110) that removes emitters that are no
- *    longer needed.
- * 4. Branch and bound (14 Oct, slides 117-118), seeded with the greedy result
- *    as the incumbent (slide 119): it keeps asking for a working set with one
- *    emitter fewer than the best so far. A branch is cut off when the pulses
- *    still missing need more emitters than are left. Branching happens only
- *    on nodes allowed by the minimum cut argument in
+ *    with a quick local estimate, then checked exactly). A local search
+ *    (14 Oct, slide 110) then removes emitters that are no longer needed,
+ *    and an iterated local search (14 Oct, slides 109-110, see
+ *    RelocationSearch) moves emitters around to look for a placement with
+ *    one emitter fewer.
+ * 4. If the best placement is still above the lower bound, the bound is
+ *    raised with a relaxation (see RegionBound).
+ * 5. Branch and bound (14 Oct, slides 117-118), seeded with the best
+ *    placement so far as the incumbent (slide 119): it keeps asking for a
+ *    working set with one emitter fewer. A branch is cut off when the pulses
+ *    still missing need more emitters than are left, or when the nodes ruled
+ *    out so far leave too little room even in a relaxed network. Branching
+ *    happens only on nodes allowed by the minimum cut argument in
  *    PulseNetwork.usefulNextEmitters, so the cut-down choice loses no
  *    solution. When a search ends without finding a smaller set, or the best
  *    set meets the lower bound, the answer is proven optimal.
@@ -57,10 +62,12 @@ public final class EmitterPlacer {
     private final Instance instance;
     private final Grid grid;
     private final long budgetMillis;
-    private long deadline;
+    /** The most pulses one emitter can send: the largest degree of a free node (8 on most grids). */
     private final int maxEmitterPulses;
     /** parasiteDistance[v]: distance from v to the nearest parasite (for ordering only). */
     private final int[] parasiteDistance;
+    // Set by solve().
+    private long deadline;
     private boolean timedOut;
     private boolean provenOptimal;
     private List<Integer> forced = new ArrayList<>();
@@ -81,7 +88,8 @@ public final class EmitterPlacer {
                 best = Math.max(best, grid.degree(v));
             }
         }
-        this.maxEmitterPulses = best;
+        // At least 1, so the divisions below are safe on a grid with no edges.
+        this.maxEmitterPulses = Math.max(1, best);
         this.parasiteDistance = distancesToParasites();
     }
 
@@ -91,6 +99,7 @@ public final class EmitterPlacer {
      * @return the emitter nodes, or null if the instance has no solution
      */
     public List<Integer> solve() {
+        timedOut = false;
         if (!isSolvable()) {
             return null;
         }
@@ -119,9 +128,9 @@ public final class EmitterPlacer {
             lower = Math.max(lower, new RegionBound(instance, maxEmitterPulses).lowerBound(forced));
         }
 
-        // Branch and bound, seeded with the greedy result: keep asking for a
-        // placement with one emitter fewer than the best so far. When a search
-        // finishes without finding one, the best placement is optimal.
+        // Branch and bound: keep asking for a placement with one emitter fewer
+        // than the best so far. When a search finishes without finding one,
+        // the best placement is optimal.
         provenOptimal = best.size() == lower;
         while (!provenOptimal && !timedOut) {
             List<Integer> smaller = branchAndBound(start, best.size() - 1);
@@ -157,12 +166,13 @@ public final class EmitterPlacer {
     }
 
     /**
-     * Step 2: the lower bound worked out by solve(). It is the larger of
+     * The lower bound worked out by solve(). Step 2 gives the larger of
      * ceil(total demand / most pulses one emitter can send) and the number of
      * forced emitters plus ceil(pulses they cannot deliver / most pulses one
      * emitter can send). The second part is valid because adding an emitter v
      * raises the maximum flow by at most degree(v): removing v's own pulses
-     * from any flow leaves a flow for the other emitters.
+     * from any flow leaves a flow for the other emitters. Step 4 may raise it
+     * further (RegionBound).
      */
     public int lowerBound() {
         return lower;
@@ -235,13 +245,17 @@ public final class EmitterPlacer {
                 int bestGain = -1;
                 for (int i = 0; i < Math.min(EXACT_CHECKS, estimates.size()); i++) {
                     int v = estimates.get(i)[0];
-                    PulseNetwork trial = network.copy();
-                    int gain = trial.addEmitter(v) - network.delivered();
+                    int gain = network.exactGain(v);
                     if (gain > bestGain) {
                         bestGain = gain;
                         chosen = v;
                     }
                 }
+            }
+            if (chosen < 0) {
+                // Cannot happen for a solvable instance: by the minimum cut
+                // argument some free node can always still raise the flow.
+                throw new IllegalStateException("no candidate emitter left");
             }
             // The chosen emitter is added exactly, so the flow stays maximum.
             network.addEmitter(chosen);
@@ -299,7 +313,7 @@ public final class EmitterPlacer {
     }
 
     /**
-     * Step 4: depth-first branch and bound for a working set of at most k
+     * Step 5: depth-first branch and bound for a working set of at most k
      * emitters that includes the forced ones.
      *
      * @return the emitters, or null if none exists (or the time ran out)
@@ -388,7 +402,8 @@ public final class EmitterPlacer {
      * every free node that is not forbidden may send pulses (and still let
      * others pass)? Any placement that avoids the forbidden nodes gives a
      * flow in this relaxed network, so if its maximum flow is below the total
-     * demand, no such placement exists. Costs one maximum flow (Dinitz, 28 Oct, slides 229-234).
+     * demand, no such placement exists. Costs one maximum flow (Dinitz,
+     * 28 Oct, slides 229-234).
      */
     private boolean coverableWithout(boolean[] forbidden) {
         PulseNetwork relaxed = new PulseNetwork(instance);
