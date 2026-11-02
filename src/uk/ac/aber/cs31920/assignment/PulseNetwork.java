@@ -1,5 +1,8 @@
 package uk.ac.aber.cs31920.assignment;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * The flow network that checks whether a set of emitters can neutralise every
  * parasite with non-crossing pulses.
@@ -330,6 +333,38 @@ public final class PulseNetwork {
             }
         }
         return count;
+    }
+
+    /** Pulses the parasite on p still lacks in the current flow. */
+    public int shortfall(int p) {
+        return instance.demand(p) - network.flow(sinkArc[p]);
+    }
+
+    /**
+     * The free nodes that could help the parasite on p, which must be short
+     * of pulses: the nodes w whose out-node can reach p's in-node in the
+     * residual network without passing through the sink.
+     *
+     * Every set of extra emitters that neutralises all parasites contains
+     * one of these nodes. Let Y be the network nodes that can reach p_in in
+     * this way. No residual arc enters Y from outside except from the source
+     * or sink, so every arc into Y (other than from the source) is full and
+     * every arc out of Y (other than into the sink) is empty. The pulses that
+     * the parasites in Y receive therefore equal the capacity into Y. Adding
+     * emitters outside Y can only remove capacity into Y (a transit arc), so
+     * those parasites could never receive more pulses in total, yet p needs
+     * more. This is the max-flow min-cut argument (23 Oct, slides 215-219)
+     * applied to the cut around Y.
+     */
+    public List<Integer> helpersOf(int p) {
+        boolean[] reach = network.canReach(in(p));
+        List<Integer> helpers = new ArrayList<>();
+        for (int w = 0; w < instance.grid().nodeCount(); w++) {
+            if (isFree(w) && reach[out(w)]) {
+                helpers.add(w);
+            }
+        }
+        return helpers;
     }
 
     /** Residual reachability to the sink, indexed by network node. */

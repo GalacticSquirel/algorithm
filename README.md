@@ -44,8 +44,13 @@ line (zero emitters). If a node is listed twice, the later line counts.
    203) searches from that emitter only. After removing one, paths can only end at
    the parasites that lost a pulse, so the search runs backwards from them.
 3. **Forced emitters and lower bounds.** A free node next to two parasites whose
-   demand equals their free degree must be an emitter. The basic lower bound is the
-   forced emitters plus ceil(missing pulses / 8). A stronger bound is used when the
+   demand equals their free degree must be an emitter. After placing them, each
+   parasite that is still short has a set of "helpers": the free nodes that can
+   reach it in the residual network without passing through the sink. By the
+   max-flow min-cut argument (23 Oct slides 215-219) every solution adds an emitter
+   in each helper set. So the lower bound is the forced emitters plus the larger of
+   ceil(missing pulses / 8) and the number of pairwise disjoint helper sets. A
+   stronger bound is used when the
    greedy answer does not meet it (a relaxation, 16 Oct slides 148 and 153, used as
    the lower bound module of branch and bound, 14 Oct slide 117):
    - region bound: a relaxed max flow, where every free node outside a small region
@@ -57,11 +62,12 @@ line (zero emitters). If a node is listed twice, the later line counts.
    estimate (tried with an undo log, then rolled back) and checks only the best few
    exactly. An iterated local search (14 Oct slides 109-110) then moves emitters
    around to find a placement with one emitter fewer, as long as it can.
-5. **Branch and bound** (14 Oct slides 117-119), seeded with the greedy result. It
-   branches only on nodes on the sink side of the minimum cut (max-flow min-cut,
-   23 Oct slides 215-219), which loses no solution. A branch is cut off when the
-   emitters left cannot make up the missing pulses at 8 each, or when the nodes
-   ruled out so far leave too little room even in the relaxed network.
+5. **Branch and bound** (14 Oct slides 117-119), seeded with the greedy result. At
+   each node it branches on the helpers of the short parasite with the fewest
+   helpers, since every completion contains one of them (same min-cut argument),
+   which loses no solution. A branch is cut off when the emitters left are fewer
+   than the bound from step 3, or when the nodes ruled out so far leave too little
+   room even in the relaxed network.
    It always runs until the answer
    is proven minimal, as the brief requires. For experiments, `-Dbudget=1000` caps
    local search and branch and bound at 1000 ms per input; the best valid placement
@@ -104,13 +110,35 @@ mostly JVM start-up.
 | input01 | `4 10 2 2` | 2 | 2 | yes |
 | input02 | `0 2 4 2` | 2 | 2 | yes |
 | input03 | `18 18` | 1 | 1 | yes |
-| input04 | 34 emitters | 34 | 33 | yes (search for 33 finished) |
+| input04 | 34 emitters | 34 | 34 | yes |
 | input05 | `no solution` | | | |
 | input06 | `10 6 14 8 18 14 4 2` | 4 | 4 | yes |
 | input07 | 9 emitters | 9 | 9 | yes |
 | input08 | `no solution` | | | |
 | input09 | 9 emitters | 9 | 9 | yes |
 | input10 | 7 emitters | 7 | 7 | yes |
+
+## Why these answers are minimal
+
+Each answer below is matched by a lower bound, so no placement with fewer emitters
+exists. One emitter on node v sends at most degree(v) pulses, so with total demand D
+and largest free degree d at least ceil(D / d) emitters are needed.
+
+| Input | Proof |
+|---|---|
+| input01 | D = 11, d = 8, so at least 2 |
+| input02 | D = 7. The only degree-8 node, (2,2), holds a parasite, so d = 5 and at least 2 |
+| input03 | D = 6 > 0, so at least 1 |
+| input04 | 32 free nodes each touch two parasites whose demand equals their free degree, so all 32 are emitters in every solution. Those 32 leave 3 pulses missing. Parasite (2,14) can then only be helped from the corner pocket (0,14), (0,16), (1,15), (2,16), and parasite (10,6) only from nodes outside that pocket. The two helper sets are disjoint, so at least 32 + 2 = 34 |
+| input05 | Parasite (10,10) needs 5 pulses but has only 4 neighbours without a parasite. Every pulse enters through a different one of them, so no placement works |
+| input06 | D = 31, d = 8, so at least 4 |
+| input07 | D = 68, d = 8, so at least 9 |
+| input08 | Parasite (24,26) needs 6 pulses but has only 5 neighbours without a parasite, so no placement works |
+| input09 | D = 71, d = 8, so at least 9 |
+| input10 | D = 56, d = 8, so at least 7 |
+
+The program checks every placement it prints with an exact maximum flow, so each
+answer works and is the minimum.
 
 ## AI use
 
