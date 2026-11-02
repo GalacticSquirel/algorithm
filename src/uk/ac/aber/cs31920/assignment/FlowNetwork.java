@@ -529,11 +529,20 @@ public final class FlowNetwork {
      * (max-flow min-cut theorem, 23 Oct, slides 215-219).
      */
     public boolean[] canReachSink() {
+        return canReach(sink);
+    }
+
+    /**
+     * Marks every node that can reach target in the residual network by a
+     * path that does not pass through the sink (a backward breadth-first
+     * search from target).
+     */
+    public boolean[] canReach(int target) {
         boolean[] reach = new boolean[nodeCount];
         int front = 0;
         int back = 0;
-        queue[back++] = sink;
-        reach[sink] = true;
+        queue[back++] = target;
+        reach[target] = true;
         while (front < back) {
             int v = queue[front++];
             // An arc u -> v is usable if it has residual capacity; its reverse
@@ -541,7 +550,7 @@ public final class FlowNetwork {
             for (int r = head[v]; r >= 0; r = next[r]) {
                 int a = r ^ 1;
                 int u = to[r];
-                if (!reach[u] && cap[a] - flow[a] > 0) {
+                if (!reach[u] && u != sink && cap[a] - flow[a] > 0) {
                     reach[u] = true;
                     queue[back++] = u;
                 }

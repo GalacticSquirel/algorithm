@@ -21,7 +21,8 @@ import java.util.List;
  *    non-parasite node.)
  * 2. Forced emitters and a lower bound: some free nodes must hold an
  *    emitter in every solution (see forcedEmitters). One emitter sends at most
- *    degree(v) <= 8 pulses, which gives the lower bound (see lowerBound).
+ *    degree(v) <= 8 pulses, and every parasite still short of pulses needs an
+ *    emitter among its helpers, which gives the lower bound (see lowerBound).
  * 3. Upper bound: starting from the forced emitters, a greedy construction
  *    keeps adding the emitter that delivers the most extra pulses (ranked
  *    with a quick local estimate, then checked exactly). A local search
@@ -35,10 +36,10 @@ import java.util.List;
  *    placement so far as the incumbent (slide 119): it keeps asking for a
  *    working set with one emitter fewer. A branch is cut off when the pulses
  *    still missing need more emitters than are left, or when the nodes ruled
- *    out so far leave too little room even in a relaxed network. Branching
- *    happens only on nodes allowed by the minimum cut argument in
- *    PulseNetwork.usefulNextEmitters, so the cut-down choice loses no
- *    solution. When a search ends without finding a smaller set, or the best
+ *    out so far leave too little room even in a relaxed network. Each node
+ *    branches on the helpers of one short parasite (PulseNetwork.helpersOf),
+ *    one of which is in every completion by the minimum cut argument, so the
+ *    cut-down choice loses no solution. When a search ends without finding a smaller set, or the best
  *    set meets the lower bound, the answer is proven optimal.
  *
  * Every candidate set is checked with the maximum flow in PulseNetwork, so any
@@ -124,6 +125,11 @@ public final class EmitterPlacer {
             }
             best = smaller;
         }
+        // The stronger bounds cost a search per short parasite, so they are
+        // only worked out when the simple bound does not settle the answer.
+        if (best.size() > lower) {
+            lower = Math.max(lower, forced.size() + emittersNeededFor(start, helperSets(start, null)));
+        }
         if (best.size() > lower) {
             lower = Math.max(lower, new RegionBound(instance, maxEmitterPulses).lowerBound(forced));
         }
@@ -168,11 +174,8 @@ public final class EmitterPlacer {
     /**
      * The lower bound worked out by solve(). Step 2 gives the larger of
      * ceil(total demand / most pulses one emitter can send) and the number of
-     * forced emitters plus ceil(pulses they cannot deliver / most pulses one
-     * emitter can send). The second part is valid because adding an emitter v
-     * raises the maximum flow by at most degree(v): removing v's own pulses
-     * from any flow leaves a flow for the other emitters. Step 4 may raise it
-     * further (RegionBound).
+     * forced emitters plus the bound of emittersNeededFor for the pulses they
+     * cannot deliver. Step 4 may raise it further (RegionBound).
      */
     public int lowerBound() {
         return lower;
@@ -347,16 +350,27 @@ public final class EmitterPlacer {
         }
         int left = k - chosen.size();
         int deficit = network.deficit();
-        if (emittersNeeded(deficit) > left) {
+        List<List<Integer>> helperSets = helperSets(network, forbidden);
+        if (emittersNeededFor(network, helperSets) > left) {
             return false;
         }
 
-        // Exact gain of every allowed candidate, best first.
+        // Branch on the short parasite with the fewest helpers, since every
+        // completion contains one of them. Exact gains decide the order.
+        List<Integer> branch = helperSets.get(0);
+        for (List<Integer> helpers : helperSets) {
+            if (helpers.size() < branch.size()) {
+                branch = helpers;
+            }
+        }
         List<int[]> children = new ArrayList<>();
-        for (int v : rankedCandidates(network, network.residualReachToSink(), forbidden, Integer.MAX_VALUE)) {
+        for (int v : branch) {
             children.add(new int[] {v, network.exactGain(v)});
         }
-        children.sort(Comparator.comparingInt((int[] c) -> -c[1]));
+        children.sort(Comparator
+            .comparingInt((int[] c) -> -c[1])
+            .thenComparingInt(c -> parasiteDistance[c[0]])
+            .thenComparingInt(c -> c[0]));
 
         List<Integer> excluded = new ArrayList<>();
         boolean found = false;
@@ -395,6 +409,65 @@ public final class EmitterPlacer {
             forbidden[v] = false;
         }
         return found;
+    }
+
+    /**
+     * For every parasite that is still short of pulses, its helpers (see
+     * PulseNetwork.helpersOf) that are not forbidden. The network's flow must
+     * be maximum.
+     */
+    private List<List<Integer>> helperSets(PulseNetwork network, boolean[] forbidden) {
+        List<List<Integer>> sets = new ArrayList<>();
+        for (int p : instance.parasites()) {
+            if (network.shortfall(p) > 0) {
+                List<Integer> helpers = new ArrayList<>();
+                for (int w : network.helpersOf(p)) {
+                    if (forbidden == null || !forbidden[w]) {
+                        helpers.add(w);
+                    }
+                }
+                sets.add(helpers);
+            }
+        }
+        return sets;
+    }
+
+    /**
+     * A lower bound on the extra emitters needed to fix the network's
+     * deficit, given the helper set of every short parasite:
+     *
+     * - each extra emitter v adds at most degree(v) <= maxEmitterPulses
+     *   pulses (removing v's own pulses from any flow leaves a flow for the
+     *   other emitters), so at least ceil(deficit / maxEmitterPulses) are
+     *   needed;
+     * - every helper set must contain an extra emitter, so if m of the sets
+     *   are pairwise disjoint, at least m are needed (one per set); and if
+     *   some set is empty, none will do (Integer.MAX_VALUE is returned).
+     *
+     * The disjoint sets are picked greedily, smallest first, which may miss
+     * the largest such family but always gives a valid bound.
+     */
+    private int emittersNeededFor(PulseNetwork network, List<List<Integer>> helperSets) {
+        List<List<Integer>> bySize = new ArrayList<>(helperSets);
+        bySize.sort(Comparator.comparingInt(List::size));
+        boolean[] used = new boolean[grid.nodeCount()];
+        int disjoint = 0;
+        for (List<Integer> helpers : bySize) {
+            if (helpers.isEmpty()) {
+                return Integer.MAX_VALUE;
+            }
+            boolean free = true;
+            for (int w : helpers) {
+                free &= !used[w];
+            }
+            if (free) {
+                disjoint++;
+                for (int w : helpers) {
+                    used[w] = true;
+                }
+            }
+        }
+        return Math.max(disjoint, emittersNeeded(network.deficit()));
     }
 
     /**
