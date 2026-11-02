@@ -11,7 +11,7 @@ Cells (i,j) are the odd nodes (2i+1, 2j+1); corners (i,j) are the even nodes
 (2i, 2j). Every even node holds a parasite. The asserts check the three gadget
 invariants (I1)-(I3) of the README on every generated instance.
 
-Run: python3 gen.py   (writes k4.txt, c5.txt, star.txt and prints the expected minimum)
+Run: python3 gen.py   (writes one .txt per graph in GRAPHS and prints the expected minimum)
 Not part of the Java submission."""
 import itertools, sys
 
@@ -167,6 +167,28 @@ GRAPHS = {
     "star": ({"o": (2, 2), "p": (0, 2), "q": (4, 2), "r": (2, 4), "t": (4, 4)},
              [("o", "p", [(2, 2), (0, 2)]), ("o", "q", [(2, 2), (4, 2)]), ("o", "r", [(2, 2), (2, 4)]),
               ("q", "t", [(4, 2), (4, 4)])]),
+    # Added in the review: every degree-3 vertex a T-junction, perpendicular arms in
+    # all four directions (Q3); two hubs (K23); planar cubic with VC 4 (prism); a path
+    # with several bends next to an isolated vertex.
+    "Q3": ({"o1": (3, 0), "o2": (6, 3), "o3": (3, 6), "o4": (0, 3),
+            "i1": (3, 2), "i2": (4, 3), "i3": (3, 4), "i4": (2, 3)},
+           [("o1", "o2", [(3, 0), (6, 0), (6, 3)]), ("o2", "o3", [(6, 3), (6, 6), (3, 6)]),
+            ("o3", "o4", [(3, 6), (0, 6), (0, 3)]), ("o4", "o1", [(0, 3), (0, 0), (3, 0)]),
+            ("i1", "i2", [(3, 2), (4, 2), (4, 3)]), ("i2", "i3", [(4, 3), (4, 4), (3, 4)]),
+            ("i3", "i4", [(3, 4), (2, 4), (2, 3)]), ("i4", "i1", [(2, 3), (2, 2), (3, 2)]),
+            ("o1", "i1", [(3, 0), (3, 2)]), ("i2", "o2", [(4, 3), (6, 3)]),
+            ("o3", "i3", [(3, 6), (3, 4)]), ("i4", "o4", [(2, 3), (0, 3)])]),
+    "K23": ({"h": (0, 2), "k": (6, 2), "a": (3, 0), "b": (3, 2), "c": (3, 4)},
+            [("h", "b", [(0, 2), (3, 2)]), ("h", "c", [(0, 2), (0, 4), (3, 4)]),
+             ("h", "a", [(0, 2), (0, 0), (3, 0)]), ("b", "k", [(3, 2), (6, 2)]),
+             ("c", "k", [(3, 4), (6, 4), (6, 2)]), ("a", "k", [(3, 0), (6, 0), (6, 2)])]),
+    "prism": ({"a": (3, 0), "b": (6, 4), "c": (0, 4), "x": (3, 2), "y": (4, 4), "z": (2, 4)},
+              [("a", "b", [(3, 0), (6, 0), (6, 4)]), ("b", "c", [(6, 4), (6, 8), (0, 8), (0, 4)]),
+               ("c", "a", [(0, 4), (0, 0), (3, 0)]), ("x", "y", [(3, 2), (4, 2), (4, 4)]),
+               ("y", "z", [(4, 4), (4, 6), (2, 6), (2, 4)]), ("z", "x", [(2, 4), (2, 2), (3, 2)]),
+               ("a", "x", [(3, 0), (3, 2)]), ("y", "b", [(4, 4), (6, 4)]), ("c", "z", [(0, 4), (2, 4)])]),
+    "zigzag": ({"p": (0, 0), "q": (3, 4), "r": (7, 1), "iso": (9, 6)},
+               [("p", "q", [(0, 0), (1, 0), (1, 2), (3, 2), (3, 4)]), ("q", "r", [(3, 4), (7, 4), (7, 1)])]),
 }
 
 if __name__ == "__main__":

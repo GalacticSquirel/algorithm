@@ -142,14 +142,24 @@ answer works and is the minimum.
 
 ## Finding the minimum is NP-hard
 
-**Theorem.** The decision problem EMITTERS is NP-complete: given an instance and a
-number K, can K emitters neutralise every parasite? So no algorithm finds the
-smallest number of emitters in polynomial time unless P = NP.
+**Theorem.** The decision problem EMITTERS asks: given an instance and a number K,
+can at most K emitters neutralise every parasite? EMITTERS is NP-hard, and it is
+NP-complete when the size of an instance is measured by its grid size
+N = (l+1)^2 + l^2. So no algorithm finds the smallest number of emitters in
+polynomial time unless P = NP.
 
-Input size is measured by the grid size N = (l+1)^2 + l^2, which the program has to
-build anyway. The hardness part does not depend on this choice, because the
-instances built below list every even node as a parasite, so their files already
-have length at least l^2.
+*Which input size.* The two halves of the theorem need different care.
+- Hardness holds under any reasonable encoding. The instances built below list every
+  even node as a parasite, so their files have length at least l^2, and every number
+  in them (l, the coordinates, demands of at most 4) is polynomial in the size of the
+  vertex cover instance. So the reduction is polynomial whether l is written in
+  binary or in unary. (This also makes the problem *strongly* NP-hard: it stays hard
+  when all numbers are small.)
+- Membership in NP is proved only for the grid-size measure, which is the same as
+  writing l in unary. If l is written in binary, a file of a few lines can describe a
+  grid exponentially larger than the file, and the verifier below, which builds the
+  whole grid, is then not polynomial. We do not claim membership for that encoding,
+  and the hardness result does not need it.
 
 Definitions used: NP by certificates (2 Oct, slide 33), NP-hardness (2 Oct, slide
 38), and proving NP-hardness by a polynomial reduction from a known NP-hard problem,
@@ -158,15 +168,18 @@ the drawing theorem, come from the literature, not the slides.
 
 ### EMITTERS is in NP
 
-The certificate is a set of at most K free nodes. A verifier builds the node-split
-network for it and checks that its maximum flow equals the total demand. This is the
+The certificate is a set of at most K free nodes (it never needs more than N). A
+verifier builds the node-split network for it, which has O(N) nodes and edges, and
+checks that its maximum flow equals the total demand. This is the
 check `PulseNetwork` does (22 Oct, slides 189-195), and it runs in polynomial time,
 for example with Dinitz's algorithm in O(n^2 e) (28 Oct, slide 234).
 
 ### Reduction from planar vertex cover
 
 VERTEX COVER is NP-complete even for planar graphs of maximum degree 3 (Garey and
-Johnson 1977). Let G be such a graph and k a number. The construction below runs in
+Johnson 1977; Mohar 2001 gives a complete proof even for planar graphs where every
+vertex has degree exactly 3). Degree at most 3 is needed below: a vertex cell with
+four arms would leave no designated corner for its arms. Let G be such a graph and k a number. The construction below runs in
 polynomial time.
 
 **Cells and corners.** Call the odd nodes *cells*: (2i+1, 2j+1) is the centre of a
@@ -212,7 +225,12 @@ vertices, and the minimum cover grows by t.
 1. Draw G orthogonally on a grid. Vertices go to grid points and edges to
    non-crossing rectilinear paths. This takes polynomial time and O(n^2) area for
    planar graphs of maximum degree 4 (Valiant 1981; Tamassia 1987). Scale the drawing
-   by 32.
+   by 32, so every straight segment is at least 32 cells long and separate parts of
+   the drawing are at least 32 cells apart. The gadgets below need at most 4 cells
+   next to a vertex and a straight stretch of 20 cells, and reach at most 3 cells
+   sideways, so they always fit and only touch other chains where chains meet at a
+   vertex. (`gen.py` raises an error if a gadget does not fit. The
+   cube graph Q3 needs a scale of at least 27.)
 2. Mark *choice cells*. Each vertex becomes one cell, and each edge becomes a chain of
    cells along its path, consecutive cells being neighbours. Two local changes are
    needed:
@@ -238,7 +256,8 @@ vertices, and the minimum cover grows by t.
 
 The gadgets keep three invariants. Each can be checked locally on the pictures above
 and on straight runs and turns. `proof/gen.py` asserts all three on every instance it
-builds.
+builds, and `proof/stress.py` builds 1,200 random drawings to check that they hold
+beyond the hand-made examples.
 
 - **(I1)** No 2×2 block consists of choice cells only. So f(p) ≥ 1 and 1 ≤ d(p) ≤ 4
   at every corner, which makes the instance valid, and it passes the no-solution test.
@@ -262,21 +281,42 @@ So G has a vertex cover of size k if and only if the instance can be solved with
 F + k + Σ t_e emitters. The instance has O(n^2) nodes and is built in polynomial
 time. Together with membership in NP, this proves the theorem. ∎
 
-**Checked by program.**
-- `proof/gen.py` builds instances for K4, a 5-cycle and a small tree, and asserts
-  (I1)-(I3).
+**Checked by program.** The proof above is the argument. These scripts look for
+mistakes in it; they are not part of the Java submission.
+- `proof/gen.py` builds instances for seven graphs: K4, a 5-cycle, a small tree, the cube Q3 (eight T-junctions, with the perpendicular arm in
+  all four directions), K2,3, the triangular prism, and a path with several bends next
+  to an isolated vertex. It asserts (I1)-(I3) on each.
 - `proof/check.py` reads only the instance file, rederives the forced cells and the
   residual pair constraints, and computes the minimum exactly. It matches
-  F + VC(G) + Σ t_e in all three cases.
-- On three smaller versions (scale 5: one edge, a path of three vertices and a
-  4-cycle), the Java solver also proves the same minimum through its max flow.
+  F + VC(G) + Σ t_e for all seven.
+- `proof/stress.py` does the same on 1,200 random orthogonal drawings (seeds 0-3, 300
+  each), including parallel edges, bends next to vertices and isolated vertices. It
+  also checks that the residual graph is G with each edge replaced by an even-length
+  path, edge for edge, not just that the numbers agree. The test was checked to fail
+  when the T-junction step or the designated corners are removed from `gen.py`.
+- `check.py` and `stress.py` rely on Lemmas 1 and 2. `proof/semantic.py` does not. It
+  has its own node-split max flow written from the brief's rules (vertex-disjoint
+  pulses, one per incident edge, nothing through an emitter or a parasite). First it
+  checks Lemma 1 against max flow on 300 random small grids. Then, at scale 14, for
+  six of the graphs, it finds by max flow which cells are needed in every solution
+  and which pairs of cells must contain an emitter, checks that the pairs form G with
+  even subdivisions, and proves the minimum from the rules alone: a lower bound from
+  those facts plus an exact vertex cover, and an emitter set of that size that passes
+  max flow. Each minimum equals F + VC(G) + Σ t_e.
+- The Java solver, an independent max-flow implementation, proves the same minimum on
+  three scale-5 instances (one edge 193, a path of three vertices 190, a 4-cycle 186;
+  build them with `gen.S = 5`).
 - On the full-size K4 instance the solver did not finish within ten minutes. That
-  fits the theorem but is not evidence for it: the proof above is the argument.
+  fits the theorem but is not evidence for it.
 
 **References.**
 - M. R. Garey and D. S. Johnson, "The rectilinear Steiner tree problem is
-  NP-complete", SIAM J. Appl. Math. 32(4), 1977 (vertex cover in planar graphs of
-  degree at most 3).
+  NP-complete", SIAM J. Appl. Math. 32(4), 826-834, 1977 (vertex cover in planar
+  graphs of degree at most 3). Do not cite Garey, Johnson and Stockmeyer 1976 for
+  this: their planar vertex cover reduction only reaches maximum degree 6.
+- B. Mohar, "Face covers and the genus problem for apex graphs", J. Combin. Theory
+  Ser. B 82(1), 102-117, 2001 (a complete proof for planar graphs with every degree
+  exactly 3, after Theorem 4.1).
 - L. G. Valiant, "Universality considerations in VLSI circuits", IEEE Trans.
   Computers C-30(2), 1981.
 - R. Tamassia, "On embedding a graph in the grid with the minimum number of bends",
