@@ -7,7 +7,6 @@ import java.util.List;
 /**
  * A lower bound for crowded instances, based on regions that must contain an
  * emitter.
- *
  * Take a set R of free nodes and allow every free node outside R to be a
  * source (while still letting pulses pass through it). This is a relaxation
  * (16 Oct, slides 148 and 153: drop a restriction, and the relaxed optimum
@@ -17,14 +16,11 @@ import java.util.List;
  * maximum flow is below the total demand, then every working placement has an
  * emitter in R. Such an emitter sends at most cap(R) pulses, the largest
  * degree in R.
- *
  * Near a crowded corner or edge, R can be a few low-degree nodes, so the
  * emitter that has to be there wastes capacity. If R_1, ..., R_m are disjoint
  * regions that each must hold an emitter, then k emitters deliver at most
  * cap(R_1) + ... + cap(R_m) + 8 (k - m) pulses, which gives the bound
- *
  *     k >= m + ceil((total demand - cap(R_1) - ... - cap(R_m)) / 8).
- *
  * Forced emitters are regions of one node. The regions are found around each
  * parasite: start with the free nodes near it and, if they really must hold
  * an emitter, drop nodes (highest degree first) for as long as the rest still

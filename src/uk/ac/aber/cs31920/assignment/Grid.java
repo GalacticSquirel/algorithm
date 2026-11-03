@@ -2,10 +2,8 @@ package uk.ac.aber.cs31920.assignment;
 
 /**
  * The energy grid: a square triangle mesh of side length l.
- *
  * Coordinates run from 0 to 2l in both directions and a pair (x, y) is a node
  * only if x and y are both even or both odd. That gives (l+1)^2 + l^2 nodes.
- *
  * Edges:
  * - an even node (x, y) is joined to the even nodes (x +- 2, y) and (x, y +- 2)
  *   along the square grid lines, and to the odd nodes (x +- 1, y +- 1) along the
@@ -13,8 +11,7 @@ package uk.ac.aber.cs31920.assignment;
  *   and one in a corner has 3;
  * - an odd node (the centre of a square cell) is joined only to its four
  *   diagonal neighbours (x +- 1, y +- 1), so it always has 4 neighbours.
- *
- * Nodes are numbered 0 .. nodeCount()-1 so that the rest of the program can use
+ * Nodes are numbered 0 ... nodeCount()-1 so that the rest of the program can use
  * plain int arrays instead of coordinate objects.
  */
 public final class Grid {

@@ -6,7 +6,6 @@ import java.util.List;
 /**
  * Iterated local search (14 Oct, slides 109-110) for a working placement
  * with a fixed number k of emitters.
- *
  * A state is a set of k emitters, and its cost is the deficit: the pulses
  * still missing in the maximum flow. A move relocates one emitter, either to
  * a free node close to it or to one of the most promising free nodes for the
@@ -15,7 +14,6 @@ import java.util.List;
  * leave a plateau. After a run of moves without progress the search restarts
  * from the best state seen. Every state is checked with the exact maximum
  * flow, so a placement with deficit 0 really works.
- *
  * This is a heuristic: it can find a smaller placement quickly, but it can
  * never show that none exists. Proving that is left to the branch and bound
  * search in EmitterPlacer.

@@ -3,15 +3,12 @@ package uk.ac.aber.cs31920.assignment;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
 /**
  * Finds a placement with as few emitters as possible.
- *
  * The steps are:
- *
  * 1. Exact no-solution test. If every free node held an emitter, each parasite
  *    could take one pulse straight from every neighbour without a parasite,
  *    and these one-edge pulses never share a node. So the instance is
@@ -41,10 +38,8 @@ import java.util.List;
  *    one of which is in every completion by the minimum cut argument, so the
  *    cut-down choice loses no solution. When a search ends without finding a smaller set, or the best
  *    set meets the lower bound, the answer is proven optimal.
- *
  * Every candidate set is checked with the maximum flow in PulseNetwork, so any
  * placement this class returns is guaranteed to work.
- *
  * The brief asks for the smallest possible number of emitters, so by default
  * the search runs until the answer is proven optimal, however long that takes
  * (it is exponential in the worst case). An optional time budget can be set
@@ -183,7 +178,6 @@ public final class EmitterPlacer {
 
     /**
      * Nodes that hold an emitter in every solution.
-     *
      * Call a parasite tight if its demand equals its number of parasite-free
      * neighbours. Every such neighbour must then deliver a pulse to it, either
      * as an emitter or as the last node of a pulse. A free node next to two
@@ -232,7 +226,7 @@ public final class EmitterPlacer {
             boolean[] reach = network.residualReachToSink();
             List<int[]> estimates = new ArrayList<>();
             int chosen = -1;
-            for (int v : rankedCandidates(network, reach, null, GREEDY_CANDIDATES)) {
+            for (int v : rankedCandidates(network, reach)) {
                 // A quick estimate never overstates the gain, so an estimate
                 // that uses every edge of v is already the best possible.
                 int estimate = network.estimateGain(v, reach);
@@ -357,7 +351,7 @@ public final class EmitterPlacer {
 
         // Branch on the short parasite with the fewest helpers, since every
         // completion contains one of them. Exact gains decide the order.
-        List<Integer> branch = helperSets.get(0);
+        List<Integer> branch = helperSets.getFirst();
         for (List<Integer> helpers : helperSets) {
             if (helpers.size() < branch.size()) {
                 branch = helpers;
@@ -397,7 +391,7 @@ public final class EmitterPlacer {
                 found = true;
                 break;
             }
-            chosen.remove(chosen.size() - 1);
+            chosen.removeLast();
             if (timedOut) {
                 break;
             }
@@ -435,7 +429,6 @@ public final class EmitterPlacer {
     /**
      * A lower bound on the extra emitters needed to fix the network's
      * deficit, given the helper set of every short parasite:
-     *
      * - each extra emitter v adds at most degree(v) <= maxEmitterPulses
      *   pulses (removing v's own pulses from any flow leaves a flow for the
      *   other emitters), so at least ceil(deficit / maxEmitterPulses) are
@@ -443,7 +436,6 @@ public final class EmitterPlacer {
      * - every helper set must contain an extra emitter, so if m of the sets
      *   are pairwise disjoint, at least m are needed (one per set); and if
      *   some set is empty, none will do (Integer.MAX_VALUE is returned).
-     *
      * The disjoint sets are picked greedily, smallest first, which may miss
      * the largest such family but always gives a valid bound.
      */
@@ -493,24 +485,23 @@ public final class EmitterPlacer {
      * promising come first: more edges that could carry a new pulse, then
      * closer to a parasite. Returns at most limit nodes.
      */
-    private List<Integer> rankedCandidates(PulseNetwork network, boolean[] reach, boolean[] forbidden,
-            int limit) {
+    private List<Integer> rankedCandidates(PulseNetwork network, boolean[] reach) {
         boolean[] useful = network.usefulNextEmitters(reach);
         List<Integer> candidates = new ArrayList<>();
         int n = grid.nodeCount();
         int[] score = new int[n];
         for (int v = 0; v < n; v++) {
-            if (useful[v] && (forbidden == null || !forbidden[v])) {
+            if (useful[v]) {
                 candidates.add(v);
                 score[v] = network.promisingEdges(v, reach);
             }
         }
-        Collections.sort(candidates, Comparator
-            .comparingInt((Integer v) -> -score[v])
-            .thenComparingInt(v -> parasiteDistance[v])
-            .thenComparingInt(v -> v));
-        if (candidates.size() > limit) {
-            return new ArrayList<>(candidates.subList(0, limit));
+        candidates.sort(Comparator
+                .comparingInt((Integer v) -> -score[v])
+                .thenComparingInt(v -> parasiteDistance[v])
+                .thenComparingInt(v -> v));
+        if (candidates.size() > GREEDY_CANDIDATES) {
+            return new ArrayList<>(candidates.subList(0, GREEDY_CANDIDATES));
         }
         return candidates;
     }

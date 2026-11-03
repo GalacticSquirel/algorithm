@@ -8,7 +8,6 @@ import java.util.List;
 
 /**
  * One problem instance: the grid and the parasites on it.
- *
  * The input file holds the side length l on the first line and then one line
  * "x y demand" per parasite. Blank lines and extra whitespace are skipped. A
  * file that does not have this form is reported with an IOException, which

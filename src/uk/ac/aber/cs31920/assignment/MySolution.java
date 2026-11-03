@@ -8,7 +8,6 @@ import java.util.List;
  * order, a single line is printed: the emitter coordinates as "x y x y ...",
  * or "no solution" if the parasites cannot all be neutralised or the file
  * cannot be read.
- *
  * Usage: java uk.ac.aber.cs31920.assignment.MySolution input01.txt input02.txt
  */
 public final class MySolution {
@@ -62,7 +61,7 @@ public final class MySolution {
     private static String format(Grid grid, List<Integer> emitters) {
         StringBuilder out = new StringBuilder();
         for (int v : emitters) {
-            if (out.length() > 0) {
+            if (!out.isEmpty()) {
                 out.append(' ');
             }
             out.append(grid.x(v)).append(' ').append(grid.y(v));

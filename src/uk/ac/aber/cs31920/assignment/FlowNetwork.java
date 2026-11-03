@@ -5,12 +5,10 @@ import java.util.Arrays;
 /**
  * A directed flow network with integer capacities and Dinitz's algorithm for
  * maximum flow (lecture 28 Oct, slides 229-234).
- *
  * Each phase builds the layered residual network with one breadth-first
  * search and then adds a blocking flow, found by depth-first search with a
  * "current arc" pointer per node so that no arc is looked at twice after it
  * has turned out to be useless in that phase (slide 232).
- *
  * Why Dinitz rather than plain Ford-Fulkerson (22 Oct, slide 203)? Ford-
  * Fulkerson needs up to |f| rounds of O(n + e) each (23 Oct, slide 212), and
  * here |f| is the total demand, which can grow linearly with the grid. The
@@ -24,11 +22,9 @@ import java.util.Arrays;
  * because a path saturates its unit arcs and each arc is then dropped. The
  * total is O(sqrt(n) * e) instead of O(|f| * e). (This sharper bound is not
  * on the slides; it is the standard argument for unit networks, adapted.)
- *
  * Every arc a is stored together with its reverse arc a ^ 1 (forward arcs have
  * even numbers). The reverse arc has capacity 0 and always carries minus the
  * flow of its partner, so the residual capacity of any arc is cap - flow.
- *
  * The topology (head, next, to) never changes after construction, so copies
  * share it and only clone the capacity and flow arrays. That makes copying a
  * network cheap, which the branch and bound search relies on. Any valid flow
@@ -116,6 +112,10 @@ public final class FlowNetwork {
         parentArc = other.parentArc;
         visitMark = other.visitMark;
         visitStamp = other.visitStamp;
+        trailArc = other.trailArc.clone();
+        trailValue = other.trailValue.clone();
+        trailSize = other.trailSize;
+        valueBeforeTrial = other.valueBeforeTrial;
     }
 
     /** A copy that can change its capacities and flow independently. */
@@ -261,7 +261,6 @@ public final class FlowNetwork {
     /**
      * Ford-Fulkerson (22 Oct, slide 203) restricted to augmenting paths that
      * start with the given arc out of the source.
-     *
      * This is enough after one source arc has been added to a network whose
      * flow was already maximum. Let X be the nodes the source could reach
      * before. No residual arc left X, otherwise the flow would not have been
@@ -385,7 +384,6 @@ public final class FlowNetwork {
      * keeping flow conservation everywhere else. The unit is traced forwards
      * to the sink and backwards to the source (or round a cycle back to the
      * arc) and every arc on the way loses one unit.
-     *
      * This is how the network reacts when a node that carries a pulse becomes
      * an emitter, or an emitter is removed: the affected pulse is cancelled
      * and the next maximise call is free to find a new route.
