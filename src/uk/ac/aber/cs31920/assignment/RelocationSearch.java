@@ -181,6 +181,6 @@ public final class RelocationSearch {
         seed ^= seed << 13;
         seed ^= seed >>> 7;
         seed ^= seed << 17;
-        return (int) Math.floorMod(seed, (long) bound);
+        return Math.floorMod(seed, bound);
     }
 }
