@@ -46,7 +46,7 @@ public final class Instance {
         try (BufferedReader in = new BufferedReader(new FileReader(fileName))) {
             String line;
             while ((line = in.readLine()) != null) {
-                line = line.trim();
+                line = line.strip();
                 if (line.isEmpty()) {
                     continue;
                 }

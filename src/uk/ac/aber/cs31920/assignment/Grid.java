@@ -1,5 +1,7 @@
 package uk.ac.aber.cs31920.assignment;
 
+import java.util.Arrays;
+
 /**
  * The energy grid: a square triangle mesh of side length l.
  * Coordinates run from 0 to 2l in both directions and a pair (x, y) is a node
@@ -67,8 +69,7 @@ public final class Grid {
                 count = collect(v, AXIS_STEPS, buffer, count);
             }
             count = collect(v, DIAGONAL_STEPS, buffer, count);
-            neighbours[v] = new int[count];
-            System.arraycopy(buffer, 0, neighbours[v], 0, count);
+            neighbours[v] = Arrays.copyOf(buffer, count);
         }
     }
 

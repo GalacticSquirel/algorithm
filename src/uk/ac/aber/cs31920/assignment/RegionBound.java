@@ -48,17 +48,11 @@ public final class RegionBound {
         this.maxEmitterPulses = maxEmitterPulses;
     }
 
-    /** A set of free nodes that must hold at least count emitters. */
-    private static final class Region {
-        final int[] nodes;
-        final int count;
-        final int capacity;
-
-        Region(int[] nodes, int count, int capacity) {
-            this.nodes = nodes;
-            this.count = count;
-            this.capacity = capacity;
-        }
+    /**
+     * A set of free nodes that must hold at least count emitters, each of
+     * which can send at most capacity pulses.
+     */
+    private record Region(int[] nodes, int count, int capacity) {
 
         /** How much this region raises the bound over plain capacity counting. */
         int strength(int maxPulses) {
@@ -84,21 +78,21 @@ public final class RegionBound {
             }
         }
         // Pick disjoint regions greedily, strongest first.
-        regions.sort(Comparator.comparingInt((Region r) -> -r.strength(maxEmitterPulses)));
+        regions.sort(Comparator.comparingInt((Region r) -> r.strength(maxEmitterPulses)).reversed());
         boolean[] used = new boolean[grid.nodeCount()];
         int count = 0;
         int capacity = 0;
         for (Region region : regions) {
             boolean disjoint = true;
-            for (int v : region.nodes) {
+            for (int v : region.nodes()) {
                 disjoint &= !used[v];
             }
             if (disjoint) {
-                for (int v : region.nodes) {
+                for (int v : region.nodes()) {
                     used[v] = true;
                 }
-                count += region.count;
-                capacity += region.count * region.capacity;
+                count += region.count();
+                capacity += region.count() * region.capacity();
             }
         }
         int rest = Math.max(0, instance.totalDemand() - capacity);
@@ -151,7 +145,7 @@ public final class RegionBound {
             return new Region(toArray(region), (missing + cap - 1) / cap, cap);
         }
         // Shrink: try opening the highest-degree nodes first.
-        region.sort(Comparator.comparingInt((Integer v) -> -grid.degree(v)));
+        region.sort(Comparator.comparingInt(grid::degree).reversed());
         List<Integer> kept = new ArrayList<>();
         for (int v : region) {
             relaxed.beginTrial();

@@ -6,6 +6,8 @@ parasite, or `no solution`.
 
 ## Build and run
 
+Needs Java 21 or later; the project targets Java 26.
+
 ```
 javac -d out src/uk/ac/aber/cs31920/assignment/*.java
 java -cp out uk.ac.aber.cs31920.assignment.MySolution inputs/input01.txt inputs/input02.txt

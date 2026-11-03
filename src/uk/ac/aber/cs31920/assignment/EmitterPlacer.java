@@ -69,6 +69,10 @@ public final class EmitterPlacer {
     private List<Integer> forced = new ArrayList<>();
     private int lower;
 
+    /** A candidate emitter together with the extra pulses it (would) deliver. */
+    private record Candidate(int node, int gain) {
+    }
+
     /**
      * @param instance     the instance to solve
      * @param budgetMillis time allowed for local search and branch and bound,
@@ -224,7 +228,7 @@ public final class EmitterPlacer {
         List<Integer> emitters = new ArrayList<>(forced);
         while (!network.isFeasible()) {
             boolean[] reach = network.residualReachToSink();
-            List<int[]> estimates = new ArrayList<>();
+            List<Candidate> estimates = new ArrayList<>();
             int chosen = -1;
             for (int v : rankedCandidates(network, reach)) {
                 // A quick estimate never overstates the gain, so an estimate
@@ -234,14 +238,14 @@ public final class EmitterPlacer {
                     chosen = v;
                     break;
                 }
-                estimates.add(new int[] {v, estimate});
+                estimates.add(new Candidate(v, estimate));
             }
             if (chosen < 0) {
                 // Check the few best estimates exactly and keep the winner.
-                estimates.sort(Comparator.comparingInt((int[] e) -> -e[1]));
+                estimates.sort(Comparator.comparingInt(Candidate::gain).reversed());
                 int bestGain = -1;
                 for (int i = 0; i < Math.min(EXACT_CHECKS, estimates.size()); i++) {
-                    int v = estimates.get(i)[0];
+                    int v = estimates.get(i).node();
                     int gain = network.exactGain(v);
                     if (gain > bestGain) {
                         bestGain = gain;
@@ -357,14 +361,14 @@ public final class EmitterPlacer {
                 branch = helpers;
             }
         }
-        List<int[]> children = new ArrayList<>();
+        List<Candidate> children = new ArrayList<>();
         for (int v : branch) {
-            children.add(new int[] {v, network.exactGain(v)});
+            children.add(new Candidate(v, network.exactGain(v)));
         }
         children.sort(Comparator
-            .comparingInt((int[] c) -> -c[1])
-            .thenComparingInt(c -> parasiteDistance[c[0]])
-            .thenComparingInt(c -> c[0]));
+            .comparingInt(Candidate::gain).reversed()
+            .thenComparingInt(c -> parasiteDistance[c.node()])
+            .thenComparingInt(Candidate::node));
 
         List<Integer> excluded = new ArrayList<>();
         boolean found = false;
@@ -373,7 +377,7 @@ public final class EmitterPlacer {
             // at most maxEmitterPulses (removing an emitter's own pulses from
             // a flow leaves a valid flow for the rest). The gains are sorted,
             // so once a child falls short every later child does too.
-            if (children.get(i)[1] + (left - 1) * maxEmitterPulses < deficit) {
+            if (children.get(i).gain() + (left - 1) * maxEmitterPulses < deficit) {
                 break;
             }
             // Every node forbidden so far stays empty in this branch. If the
@@ -383,7 +387,7 @@ public final class EmitterPlacer {
             if (i > 0 && !coverableWithout(forbidden)) {
                 break;
             }
-            int v = children.get(i)[0];
+            int v = children.get(i).node();
             PulseNetwork next = network.copy();
             next.addEmitter(v);
             chosen.add(v);
@@ -483,7 +487,7 @@ public final class EmitterPlacer {
     /**
      * Free nodes allowed by the minimum cut argument, ordered so the most
      * promising come first: more edges that could carry a new pulse, then
-     * closer to a parasite. Returns at most limit nodes.
+     * closer to a parasite. Returns at most GREEDY_CANDIDATES nodes.
      */
     private List<Integer> rankedCandidates(PulseNetwork network, boolean[] reach) {
         boolean[] useful = network.usefulNextEmitters(reach);
@@ -497,9 +501,9 @@ public final class EmitterPlacer {
             }
         }
         candidates.sort(Comparator
-                .comparingInt((Integer v) -> -score[v])
+                .comparingInt((Integer v) -> score[v]).reversed()
                 .thenComparingInt(v -> parasiteDistance[v])
-                .thenComparingInt(v -> v));
+                .thenComparingInt(Integer::intValue));
         if (candidates.size() > GREEDY_CANDIDATES) {
             return new ArrayList<>(candidates.subList(0, GREEDY_CANDIDATES));
         }

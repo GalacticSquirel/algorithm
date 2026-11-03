@@ -112,10 +112,8 @@ public final class FlowNetwork {
         parentArc = other.parentArc;
         visitMark = other.visitMark;
         visitStamp = other.visitStamp;
-        trailArc = other.trailArc.clone();
-        trailValue = other.trailValue.clone();
-        trailSize = other.trailSize;
-        valueBeforeTrial = other.valueBeforeTrial;
+        // The undo log is not copied: the field initialisers give the copy
+        // an empty log with no trial running.
     }
 
     /** A copy that can change its capacities and flow independently. */
