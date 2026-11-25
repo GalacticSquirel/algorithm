@@ -7,16 +7,18 @@ import java.util.List;
  * The flow network that checks whether a set of emitters can neutralise every
  * parasite with non-crossing pulses.
  *
- * Pulses must be vertex-disjoint paths (they may only share their emitter or
- * their parasite), which is turned into a flow problem as follows:
+ * Pulses must be paths that share no node (they may only share their emitter
+ * or their parasite), which is turned into a flow problem as follows:
  *
- * - Node splitting (22 Oct, slide 190): every grid node v becomes an in-node
- *   and an out-node joined by a "transit" arc of capacity 1, so at most one
- *   pulse can pass through v.
- * - Every grid edge {u, w} becomes the arcs u_out -> w_in and w_out -> u_in,
- *   each of capacity 1, because the grid is undirected (22 Oct, slide 189).
- * - A super source and super sink (22 Oct, slide 191): the source has an arc
- *   to every node's out-node and every node's in-node has an arc to the sink.
+ * - Node capacities (22 Oct, slide 190): every grid node v is replaced by an
+ *   in-node and an out-node joined by a "transit" edge of capacity 1, so at most
+ *   one pulse can pass through v.
+ * - Every undirected grid edge {u, w} is replaced by the directed edges
+ *   u_out -> w_in and w_out -> u_in, each of capacity 1 (undirected edges,
+ *   22 Oct, slide 189).
+ * - A super source and super sink (22 Oct, slide 191): the super source has an
+ *   edge to every node's out-node and every node's in-node has an edge to the
+ *   super sink.
  *
  * The capacities depend on what sits on a node:
  *
@@ -27,11 +29,12 @@ import java.util.List;
  * | parasite | 0       | 0               | demand(v)    |
  *
  * So pulses start at emitters, end at parasites and can never pass through
- * either. Since each emitter-to-neighbour arc has capacity 1, an emitter sends
- * at most one pulse per incident edge, exactly as the brief requires. By the
- * integrality of Ford-Fulkerson (22 Oct, slide 195) an integer maximum flow
- * splits into unit paths, which are the pulses. The emitters work if and only
- * if the maximum flow equals the total demand.
+ * either. Since each emitter-to-neighbour edge has capacity 1, an emitter sends
+ * at most one pulse per incident edge, exactly as the brief requires. Since all
+ * capacities are integers, the Ford/Fulkerson algorithm gives an integer
+ * maximum flow (22 Oct, slide 195), which splits into s-t paths of one
+ * unit each: the pulses. The emitters work if and only if the value of the
+ * maximum flow equals the total demand.
  *
  * Emitters can be added and removed while keeping the current flow, so the
  * search only pays for the few augmenting paths that change. A new emitter
@@ -42,10 +45,10 @@ public final class PulseNetwork {
 
     private final Instance instance;
     private final FlowNetwork network;
-    /** transitArc[v], sourceArc[v], sinkArc[v]: the forward arc numbers for node v. */
-    private final int[] transitArc;
-    private final int[] sourceArc;
-    private final int[] sinkArc;
+    /** transitEdge[v], sourceEdge[v], sinkEdge[v]: the forward edge numbers for node v. */
+    private final int[] transitEdge;
+    private final int[] sourceEdge;
+    private final int[] sinkEdge;
     /** isEmitter[v] is true when v holds an emitter in this network. */
     private final boolean[] isEmitter;
 
@@ -57,27 +60,27 @@ public final class PulseNetwork {
         int source = 2 * n;
         int sink = 2 * n + 1;
 
-        // One transit, source and sink arc per node plus two arcs per edge
-        // (the adjacency lists hold every edge twice, once from each side).
-        int arcs = 3 * n;
+        // One transit, source and sink edge per node plus two directed edges per
+        // grid edge (the adjacency lists hold every grid edge twice, once from each side).
+        int edges = 3 * n;
         for (int v = 0; v < n; v++) {
-            arcs += grid.degree(v);
+            edges += grid.degree(v);
         }
-        network = new FlowNetwork(2 * n + 2, arcs, source, sink);
+        network = new FlowNetwork(2 * n + 2, edges, source, sink);
 
-        transitArc = new int[n];
-        sourceArc = new int[n];
-        sinkArc = new int[n];
+        transitEdge = new int[n];
+        sourceEdge = new int[n];
+        sinkEdge = new int[n];
         isEmitter = new boolean[n];
         for (int v = 0; v < n; v++) {
             boolean parasite = instance.hasParasite(v);
-            transitArc[v] = network.addArc(in(v), out(v), parasite ? 0 : 1);
-            sourceArc[v] = network.addArc(source, out(v), 0);
-            sinkArc[v] = network.addArc(in(v), sink, instance.demand(v));
+            transitEdge[v] = network.addEdge(in(v), out(v), parasite ? 0 : 1);
+            sourceEdge[v] = network.addEdge(source, out(v), 0);
+            sinkEdge[v] = network.addEdge(in(v), sink, instance.demand(v));
         }
         for (int v = 0; v < n; v++) {
             for (int w : grid.neighbours(v)) {
-                network.addArc(out(v), in(w), 1);
+                network.addEdge(out(v), in(w), 1);
             }
         }
     }
@@ -86,9 +89,9 @@ public final class PulseNetwork {
     private PulseNetwork(PulseNetwork other) {
         instance = other.instance;
         network = other.network.copy();
-        transitArc = other.transitArc;
-        sourceArc = other.sourceArc;
-        sinkArc = other.sinkArc;
+        transitEdge = other.transitEdge;
+        sourceEdge = other.sourceEdge;
+        sinkEdge = other.sinkEdge;
         isEmitter = other.isEmitter.clone();
     }
 
@@ -108,7 +111,7 @@ public final class PulseNetwork {
     /**
      * Places an emitter on the free node v and recomputes the maximum flow.
      * If a pulse currently runs through v it is cancelled first, because a
-     * pulse cannot pass through an emitter; Ford-Fulkerson then reroutes it if
+     * pulse cannot pass through an emitter; the Ford/Fulkerson algorithm then reroutes it if
      * it can.
      *
      * @return the number of pulses delivered afterwards
@@ -123,19 +126,19 @@ public final class PulseNetwork {
 
     /** Turns v into a source in the flow network and restores a maximum flow. */
     private int placeAndMaximise(int v) {
-        boolean rerouted = network.flow(transitArc[v]) > 0;
+        boolean rerouted = network.flow(transitEdge[v]) > 0;
         if (rerouted) {
-            network.cancelOneUnit(transitArc[v]);
+            network.cancelOneUnit(transitEdge[v]);
         }
-        network.setCapacity(transitArc[v], 0);
-        network.setCapacity(sourceArc[v], instance.grid().degree(v));
+        network.setCapacity(transitEdge[v], 0);
+        network.setCapacity(sourceEdge[v], instance.grid().degree(v));
         if (rerouted) {
             // The cancelled pulse freed capacity elsewhere, so new paths may
             // start at other emitters too: run the full algorithm.
             return network.maximise();
         }
         // Otherwise every new pulse must come from v (see augmentFrom).
-        return network.augmentFrom(sourceArc[v]);
+        return network.augmentFrom(sourceEdge[v]);
     }
 
     /**
@@ -163,8 +166,8 @@ public final class PulseNetwork {
      * route. All changes are then rolled back, and reach is left as it was.
      *
      * The estimate is a valid flow, so it never overstates the gain, but it
-     * can understate it. It is used only to rank candidates in the greedy
-     * construction, never to prove anything. Its cost depends on the size of
+     * can understate it. It is used only to rank candidates in the constructive
+     * heuristic, never to prove anything. Its cost depends on the size of
      * the reach region, not on the size of the grid.
      */
     public int estimateGain(int v, boolean[] reach) {
@@ -172,14 +175,14 @@ public final class PulseNetwork {
         network.beginTrial();
         int freed = -1;
         int[] opened = new int[0];
-        if (network.flow(transitArc[v]) > 0) {
-            freed = network.cancelOneUnit(transitArc[v]);
+        if (network.flow(transitEdge[v]) > 0) {
+            freed = network.cancelOneUnit(transitEdge[v]);
             // The cancelled pulse's route is free again, so allow it too.
             opened = network.markTrialNodes(reach);
         }
-        network.setCapacity(transitArc[v], 0);
-        network.setCapacity(sourceArc[v], instance.grid().degree(v));
-        network.augmentFrom(sourceArc[v], reach);
+        network.setCapacity(transitEdge[v], 0);
+        network.setCapacity(sourceEdge[v], instance.grid().degree(v));
+        network.augmentFrom(sourceEdge[v], reach);
         if (freed >= 0) {
             network.augmentFrom(freed, reach);
         }
@@ -201,11 +204,11 @@ public final class PulseNetwork {
         if (!isEmitter[v]) {
             throw new IllegalArgumentException("no emitter on node");
         }
-        while (network.flow(sourceArc[v]) > 0) {
-            network.cancelOneUnit(sourceArc[v]);
+        while (network.flow(sourceEdge[v]) > 0) {
+            network.cancelOneUnit(sourceEdge[v]);
         }
-        network.setCapacity(sourceArc[v], 0);
-        network.setCapacity(transitArc[v], 1);
+        network.setCapacity(sourceEdge[v], 0);
+        network.setCapacity(transitEdge[v], 1);
         isEmitter[v] = false;
         // Every augmenting path now has to end at a parasite that lost a
         // pulse, since all others are still full. So search backwards from
@@ -214,7 +217,7 @@ public final class PulseNetwork {
         while (progress) {
             progress = false;
             for (int p : instance.parasites()) {
-                if (network.flow(sinkArc[p]) < instance.demand(p) && network.augmentInto(sinkArc[p])) {
+                if (network.flow(sinkEdge[p]) < instance.demand(p) && network.augmentInto(sinkEdge[p])) {
                     progress = true;
                 }
             }
@@ -233,7 +236,7 @@ public final class PulseNetwork {
      * the flow was already maximum).
      */
     public void openRelaxedSource(int v) {
-        network.setCapacity(sourceArc[v], instance.grid().degree(v));
+        network.setCapacity(sourceEdge[v], instance.grid().degree(v));
     }
 
     /** Maximum flow of a relaxed network from scratch (Dinitz). */
@@ -244,7 +247,7 @@ public final class PulseNetwork {
     /** Opens v and updates a maximum flow with paths that start at v only. */
     public int augmentRelaxed(int v) {
         openRelaxedSource(v);
-        return network.augmentFrom(sourceArc[v]);
+        return network.augmentFrom(sourceEdge[v]);
     }
 
     /** Starts recording changes so that rollbackTrial can undo them. */
@@ -271,7 +274,7 @@ public final class PulseNetwork {
         Grid grid = instance.grid();
         for (int w = 0; w < grid.nodeCount(); w++) {
             if (isEmitter[w] && w != v) {
-                spare += grid.degree(w) - network.flow(sourceArc[w]);
+                spare += grid.degree(w) - network.flow(sourceEdge[w]);
             }
         }
         return spare;
@@ -279,7 +282,7 @@ public final class PulseNetwork {
 
     /** Pulses sent by the emitter on v in the current flow. */
     public int pulsesFrom(int v) {
-        return network.flow(sourceArc[v]);
+        return network.flow(sourceEdge[v]);
     }
 
     /** Pulses still missing to neutralise every parasite. */
@@ -301,10 +304,10 @@ public final class PulseNetwork {
      * Marks the free nodes that are worth trying as the next emitter.
      *
      * After the maximum flow, let Z be the set of network nodes that can still
-     * reach the sink in the residual network. The arcs into Z form a minimum
-     * cut whose capacity is the current flow (max-flow min-cut, 23 Oct,
-     * slides 215-219). A new emitter at w only adds an arc source -> w_out, and
-     * that arc crosses the cut only if w_out is in Z. Removing transit arcs can
+     * reach the sink in the residual network. The edges into Z form a minimum
+     * cut whose capacity is the current flow (Max-Flow Min-Cut Theorem, 23 Oct,
+     * slides 215-219). A new emitter at w only adds an edge source -> w_out, and
+     * that edge crosses the cut only if w_out is in Z. Removing transit edges can
      * only lower the cut. So if every new emitter had w_out outside Z the cut,
      * and with it the flow, could not grow. Every set of extra emitters that
      * fixes the deficit must therefore contain at least one node marked here.
@@ -337,7 +340,7 @@ public final class PulseNetwork {
 
     /** Pulses the parasite on p still lacks in the current flow. */
     public int shortfall(int p) {
-        return instance.demand(p) - network.flow(sinkArc[p]);
+        return instance.demand(p) - network.flow(sinkEdge[p]);
     }
 
     /**
@@ -347,13 +350,13 @@ public final class PulseNetwork {
      *
      * Every set of extra emitters that neutralises all parasites contains
      * one of these nodes. Let Y be the network nodes that can reach p_in in
-     * this way. No residual arc enters Y from outside except from the source
-     * or sink, so every arc into Y (other than from the source) is full and
-     * every arc out of Y (other than into the sink) is empty. The pulses that
+     * this way. No residual edge enters Y from outside except from the source
+     * or sink, so every edge into Y (other than from the source) is full and
+     * every edge out of Y (other than into the sink) is empty. The pulses that
      * the parasites in Y receive therefore equal the capacity into Y. Adding
-     * emitters outside Y can only remove capacity into Y (a transit arc), so
+     * emitters outside Y can only remove capacity into Y (a transit edge), so
      * those parasites could never receive more pulses in total, yet p needs
-     * more. This is the max-flow min-cut argument (23 Oct, slides 215-219)
+     * more. This is the Max-Flow Min-Cut Theorem (23 Oct, slides 215-219)
      * applied to the cut around Y.
      */
     public List<Integer> helpersOf(int p) {

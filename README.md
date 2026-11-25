@@ -30,45 +30,47 @@ line (zero emitters). If a node is listed twice, the later line counts.
 | `MySolution` | Entry point: one line of output per input file |
 | `Instance` | Reads an input file |
 | `Grid` | Triangle mesh: node numbering, coordinates, neighbours |
-| `FlowNetwork` | Dinitz max flow, plus Ford-Fulkerson searches from one changed arc and an undo log |
-| `PulseNetwork` | Node-split flow network that checks a set of emitters |
-| `EmitterPlacer` | No-solution test, forced emitters, lower bounds, greedy, local search, branch and bound |
+| `FlowNetwork` | Dinitz's algorithm for maximum flow, plus Ford/Fulkerson algorithm searches from one changed edge and an undo log |
+| `PulseNetwork` | Flow network with node capacities (22 Oct s190) that checks a set of emitters |
+| `EmitterPlacer` | No-solution test, forced emitters, lower bound module, constructive heuristic (upper bound module), local search, branch and bound |
 | `RelocationSearch` | Iterated local search for a placement with one emitter fewer |
 | `RegionBound` | Lower bound from small regions that must hold an emitter |
 
 1. **No-solution test (exact).** The instance is solvable exactly when every
    parasite's demand is at most its number of parasite-free neighbours.
-2. **Checking a placement.** Pulses are vertex-disjoint paths, so a placement works
-   exactly when the maximum flow in the node-split network equals the total demand
+2. **Checking a placement.** Pulses are paths that share no node, so a placement works
+   exactly when the value of the maximum flow, in the network with node capacities
+   and a super source and super sink, equals the total demand
    (22 Oct slides 189-191, 195). From scratch this uses Dinitz's algorithm (28 Oct
-   slides 229-234). After adding one emitter, only augmenting paths that start at it
-   can exist (cut argument, 23 Oct slides 215-219), so Ford-Fulkerson (22 Oct slide
-   203) searches from that emitter only. After removing one, paths can only end at
+   slides 229-234). After adding one emitter, only s-t paths in the residual network that start
+   at it can exist (minimum cut argument, 23 Oct slides 215-219), so the Ford/Fulkerson
+   algorithm (22 Oct slide 203) searches from that emitter only. After removing one, paths can only end at
    the parasites that lost a pulse, so the search runs backwards from them.
 3. **Forced emitters and lower bounds.** A free node next to two parasites whose
    demand equals their free degree must be an emitter. After placing them, each
    parasite that is still short has a set of "helpers": the free nodes that can
    reach it in the residual network without passing through the sink. By the
-   max-flow min-cut argument (23 Oct slides 215-219) every solution adds an emitter
+   Max-Flow Min-Cut Theorem (23 Oct slides 215-219) every solution adds an emitter
    in each helper set. So the lower bound is the forced emitters plus the larger of
    ceil(missing pulses / 8) and the number of pairwise disjoint helper sets. A
    stronger bound is used when the
-   greedy answer does not meet it (a relaxation, 16 Oct slides 148 and 153, used as
+   upper bound does not meet it (a relaxation, 16 Oct slides 148 and 153, used as
    the lower bound module of branch and bound, 14 Oct slide 117):
-   - region bound: a relaxed max flow, where every free node outside a small region
+   - region bound: a relaxed maximum flow, where every free node outside a small region
      may send pulses, shows when that region must hold an emitter. Near crowded
      corners and edges such a region has only low-degree nodes, so its emitter
      wastes capacity.
-4. **Upper bound.** Greedy construction plus a local search that drops unneeded
-   emitters (14 Oct slide 110). The greedy ranks candidates with a cheap local
+4. **Upper bound module** (14 Oct slide 117). A constructive heuristic plus a local search that drops unneeded
+   emitters (14 Oct slide 110). The constructive heuristic ranks candidates with a cheap local
    estimate (tried with an undo log, then rolled back) and checks only the best few
    exactly. An iterated local search (14 Oct slides 109-110) then moves emitters
    around to find a placement with one emitter fewer, as long as it can.
-5. **Branch and bound** (14 Oct slides 117-119), seeded with the greedy result. At
-   each node it branches on the helpers of the short parasite with the fewest
-   helpers, since every completion contains one of them (same min-cut argument),
-   which loses no solution. A branch is cut off when the emitters left are fewer
-   than the bound from step 3, or when the nodes ruled out so far leave too little
+5. **Branch and bound** (14 Oct slides 117-119), seeded with the best known upper bound. Each
+   problem variant is restricted using the helpers of the short parasite with the
+   fewest helpers, since every completion contains one of them (same minimum cut
+   argument), which loses no solution. A problem variant is dropped when its lower
+   bound is not better than the best known upper bound: when the emitters left are
+   fewer than the bound from step 3, or when the nodes ruled out so far leave too little
    room even in the relaxed network.
    It always runs until the answer
    is proven minimal, as the brief requires. For experiments, `-Dbudget=1000` caps
@@ -78,21 +80,17 @@ line (zero emitters). If a node is listed twice, the later line counts.
 ## Complexity
 
 N is the number of grid nodes ((l+1)^2 + l^2), so the flow network has O(N) nodes
-and O(N) arcs. D is the total demand (at most 8 per parasite), P the number of
-parasites, K the number of emitters and M = 40 the greedy candidates per step.
+and O(N) edges. D is the total demand (at most 8 per parasite), P the number of
+parasites, K the number of emitters and M = 40 the candidates per step of the constructive heuristic.
 
 | Step | Before | After |
 |---|---|---|
-| Max flow from scratch | Ford-Fulkerson O(D·N) (23 Oct s212), O(N^2) when D grows with N | Dinitz: O(n^2 e) in general (28 Oct s234), O(sqrt(N)·N) on this near-unit network |
+| Maximum flow from scratch | Ford/Fulkerson algorithm O(D·N), pseudo-polynomial (23 Oct s212) | Dinitz's algorithm: O(n^2 e), polynomial (28 Oct s234) |
 | Add one emitter | copy O(N) + search from the source O(N) | search from the new emitter only: O(N) worst case, usually just the area around it |
-| Greedy step | M exact trials, O(M·N) | one O(N) reachability search + M estimates over the reachable area R, O(N + M·R), with undo instead of copying + 4 exact trials |
-| Local search pass | rebuild after every success, each check a full max flow: O(K·D·N) per check round | one network kept up to date; each check is a backward search from at most 8 parasites, O(N), skipped outright when the others lack spare capacity |
-| Branch and bound node overhead | O(N·P) parasite distances + sort | O(N log N) sort (distances precomputed once in O(N)) |
+| Constructive heuristic step | M exact trials, O(M·N) | one O(N) reachability search + M estimates over the reachable area R, O(N + M·R), with undo instead of copying + 4 exact trials |
+| Local search pass | rebuild after every success, each check a full maximum flow: O(K·D·N) per check round | one network kept up to date; each check is a backward search from at most 8 parasites, O(N), skipped outright when the others lack spare capacity |
+| Branch and bound overhead per problem variant | O(N·P) parasite distances + sort | O(N log N) sort (distances precomputed once in O(N)) |
 | Whole minimisation | exponential worst case | exponential worst case; no polynomial exact method exists unless P = NP (see below) |
-
-The sqrt(N) phase bound for Dinitz is not on the slides. The argument is in the
-`FlowNetwork` class comment: free nodes carry at most one unit and other nodes at
-most 8, so after d phases at most 8N/d units are missing.
 
 Measured on generated grids with sparse parasites (total time per file):
 
@@ -171,7 +169,7 @@ the drawing theorem, come from the literature, not the slides.
 ### EMITTERS is in NP
 
 The certificate is a set of at most K free nodes (it never needs more than N). A
-verifier builds the node-split network for it, which has O(N) nodes and edges, and
+verifier builds the network with node capacities for it, which has O(N) nodes and edges, and
 checks that its maximum flow equals the total demand. This is the
 check `PulseNetwork` does (22 Oct, slides 189-195), and it runs in polynomial time,
 for example with Dinitz's algorithm in O(n^2 e) (28 Oct, slide 234).
@@ -293,19 +291,19 @@ mistakes in it; they are not part of the Java submission.
   F + VC(G) + Σ t_e for all seven.
 - `proof/stress.py` does the same on 1,200 random orthogonal drawings (seeds 0-3, 300
   each), including parallel edges, bends next to vertices and isolated vertices. It
-  also checks that the residual graph is G with each edge replaced by an even-length
+  also checks that the remaining graph is G with each edge replaced by an even-length
   path, edge for edge, not just that the numbers agree. The test was checked to fail
   when the T-junction step or the designated corners are removed from `gen.py`.
 - `check.py` and `stress.py` rely on Lemmas 1 and 2. `proof/semantic.py` does not. It
-  has its own node-split max flow written from the brief's rules (vertex-disjoint
-  pulses, one per incident edge, nothing through an emitter or a parasite). First it
-  checks Lemma 1 against max flow on 300 random small grids. Then, at scale 14, for
-  six of the graphs, it finds by max flow which cells are needed in every solution
+  has its own maximum flow with node capacities written from the brief's rules (pulses that
+  share no node, one per incident edge, nothing through an emitter or a parasite). First it
+  checks Lemma 1 against maximum flow on 300 random small grids. Then, at scale 14, for
+  six of the graphs, it finds by maximum flow which cells are needed in every solution
   and which pairs of cells must contain an emitter, checks that the pairs form G with
   even subdivisions, and proves the minimum from the rules alone: a lower bound from
   those facts plus an exact vertex cover, and an emitter set of that size that passes
-  max flow. Each minimum equals F + VC(G) + Σ t_e.
-- The Java solver, an independent max-flow implementation, proves the same minimum on
+  maximum flow. Each minimum equals F + VC(G) + Σ t_e.
+- The Java solver, an independent maximum flow implementation, proves the same minimum on
   three scale-5 instances (one edge 193, a path of three vertices 190, a 4-cycle 186;
   build them with `gen.S = 5`).
 - On the full-size K4 instance the solver did not finish within ten minutes. That
