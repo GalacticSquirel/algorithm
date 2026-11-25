@@ -5,26 +5,20 @@ import java.util.Arrays;
 /**
  * A directed flow network with integer capacities and Dinitz's algorithm for
  * maximum flow (lecture 28 Oct, slides 229-234).
- * Each phase builds the layered residual network with one breadth-first
- * search and then adds a blocking flow, found by depth-first search with a
- * "current arc" pointer per node so that no arc is looked at twice after it
- * has turned out to be useless in that phase (slide 232).
- * Why Dinitz rather than plain Ford-Fulkerson (22 Oct, slide 203)? Ford-
- * Fulkerson needs up to |f| rounds of O(n + e) each (23 Oct, slide 212), and
- * here |f| is the total demand, which can grow linearly with the grid. The
- * general bound for Dinitz, O(n^2 e) (slide 234), looks worse, but the pulse
- * network is almost a unit network: after node splitting a free node carries
- * at most one unit, and an emitter or parasite at most 8 (its degree). So the
- * remaining flow splits into paths that share each node at most 8 times.
- * After d phases every augmenting path is longer than d, so at most 8n/d
- * units of flow are still missing. Taking d = sqrt(n) shows there are only
- * O(sqrt(n)) phases. A blocking flow takes O(e) time in such a network,
- * because a path saturates its unit arcs and each arc is then dropped. The
- * total is O(sqrt(n) * e) instead of O(|f| * e). (This sharper bound is not
- * on the slides; it is the standard argument for unit networks, adapted.)
- * Every arc a is stored together with its reverse arc a ^ 1 (forward arcs have
- * even numbers). The reverse arc has capacity 0 and always carries minus the
- * flow of its partner, so the residual capacity of any arc is cap - flow.
+ * Each round computes the layered residual network with one breadth first
+ * search (BFS) and then adds a blocking flow, found by depth first search
+ * (DFS) that removes dead ends as they are discovered (slide 232). A
+ * "current edge" pointer per node makes sure no edge is looked at twice
+ * after it has turned out to be useless in that round.
+ * Why Dinitz's algorithm rather than the Ford/Fulkerson algorithm (22 Oct,
+ * slide 203)? The Ford/Fulkerson algorithm has pseudo-polynomial runtime
+ * (23 Oct, slide 212): it may need as many rounds as the value of the
+ * maximum flow, here the total demand. Dinitz's algorithm has polynomial
+ * runtime O(n^2 e) (28 Oct, slide 234), independent of the capacities.
+ * Every edge a is stored together with its backward edge a ^ 1 (forward
+ * edges have even numbers). The backward edge has capacity 0 and always
+ * carries minus the flow of its partner, so the residual capacity of any
+ * edge is cap - flow.
  * The topology (head, next, to) never changes after construction, so copies
  * share it and only clone the capacity and flow arrays. That makes copying a
  * network cheap, which the branch and bound search relies on. Any valid flow
@@ -41,7 +35,7 @@ public final class FlowNetwork {
     private final int[] head;
     private final int[] next;
     private final int[] to;
-    private int arcCount;
+    private int edgeCount;
 
     // State, cloned by copies.
     private final int[] cap;
@@ -50,18 +44,18 @@ public final class FlowNetwork {
 
     // Scratch space for the searches, shared between copies (the program is
     // single threaded, so only one network searches at a time).
-    private final int[] level;
-    private final int[] currentArc;
-    private final int[] pathArc;
+    private final int[] distance;
+    private final int[] currentEdge;
+    private final int[] pathEdge;
     private final int[] queue;
-    private final int[] parentArc;
+    private final int[] parentEdge;
     private final int[] visitMark;
     /** One counter in an array so that copies share it with visitMark. */
     private final int[] visitStamp;
 
     // Undo log for trial changes (see beginTrial / rollback). An entry
-    // (arc, amount) undoes a push; an entry (~arc, old) undoes a capacity change.
-    private int[] trailArc = new int[64];
+    // (edge, amount) undoes a push; an entry (~edge, old) undoes a capacity change.
+    private int[] trailEdge = new int[64];
     private int[] trailValue = new int[64];
     private int trailSize = -1;
     private int valueBeforeTrial;
@@ -70,25 +64,25 @@ public final class FlowNetwork {
      * Creates an empty network.
      *
      * @param nodeCount number of nodes, numbered 0 .. nodeCount-1
-     * @param maxArcs   number of forward arcs that will be added
+     * @param maxEdges   number of forward edges that will be added
      * @param source    the source node
      * @param sink      the sink node
      */
-    public FlowNetwork(int nodeCount, int maxArcs, int source, int sink) {
+    public FlowNetwork(int nodeCount, int maxEdges, int source, int sink) {
         this.nodeCount = nodeCount;
         this.source = source;
         this.sink = sink;
         head = new int[nodeCount];
         Arrays.fill(head, -1);
-        next = new int[2 * maxArcs];
-        to = new int[2 * maxArcs];
-        cap = new int[2 * maxArcs];
-        flow = new int[2 * maxArcs];
-        level = new int[nodeCount];
-        currentArc = new int[nodeCount];
-        pathArc = new int[nodeCount];
+        next = new int[2 * maxEdges];
+        to = new int[2 * maxEdges];
+        cap = new int[2 * maxEdges];
+        flow = new int[2 * maxEdges];
+        distance = new int[nodeCount];
+        currentEdge = new int[nodeCount];
+        pathEdge = new int[nodeCount];
         queue = new int[nodeCount];
-        parentArc = new int[nodeCount];
+        parentEdge = new int[nodeCount];
         visitMark = new int[nodeCount];
         visitStamp = new int[1];
     }
@@ -101,15 +95,15 @@ public final class FlowNetwork {
         head = other.head;
         next = other.next;
         to = other.to;
-        arcCount = other.arcCount;
+        edgeCount = other.edgeCount;
         cap = other.cap.clone();
         flow = other.flow.clone();
         value = other.value;
-        level = other.level;
-        currentArc = other.currentArc;
-        pathArc = other.pathArc;
+        distance = other.distance;
+        currentEdge = other.currentEdge;
+        pathEdge = other.pathEdge;
         queue = other.queue;
-        parentArc = other.parentArc;
+        parentEdge = other.parentEdge;
         visitMark = other.visitMark;
         visitStamp = other.visitStamp;
         // The undo log is not copied: the field initialisers give the copy
@@ -122,12 +116,12 @@ public final class FlowNetwork {
     }
 
     /**
-     * Adds an arc u -> v with the given capacity (and its reverse arc).
+     * Adds an edge u -> v with the given capacity (and its backward edge).
      *
-     * @return the number of the forward arc
+     * @return the number of the forward edge
      */
-    public int addArc(int u, int v, int capacity) {
-        int a = 2 * arcCount++;
+    public int addEdge(int u, int v, int capacity) {
+        int a = 2 * edgeCount++;
         link(a, u, v, capacity);
         link(a + 1, v, u, 0);
         return a;
@@ -145,36 +139,36 @@ public final class FlowNetwork {
         return value;
     }
 
-    /** The flow on the given arc. */
-    public int flow(int arc) {
-        return flow[arc];
+    /** The flow on the given edge. */
+    public int flow(int edge) {
+        return flow[edge];
     }
 
     /**
-     * Changes the capacity of a forward arc. The caller must make sure the arc
+     * Changes the capacity of a forward edge. The caller must make sure the edge
      * does not carry more flow than the new capacity (see cancelOneUnit).
      */
-    public void setCapacity(int arc, int capacity) {
-        if (flow[arc] > capacity) {
-            throw new IllegalStateException("arc carries more flow than the new capacity");
+    public void setCapacity(int edge, int capacity) {
+        if (flow[edge] > capacity) {
+            throw new IllegalStateException("edge carries more flow than the new capacity");
         }
-        record(~arc, cap[arc]);
-        cap[arc] = capacity;
+        record(~edge, cap[edge]);
+        cap[edge] = capacity;
     }
 
     /**
      * Runs Dinitz's algorithm from the current flow: while the sink can be
-     * reached in the residual network, build the layered network and add a
+     * reached in the residual network, compute the layered residual network and add a
      * blocking flow (28 Oct, slide 231).
      *
-     * @return the maximum flow value
+     * @return the value of the maximum flow
      */
     public int maximise() {
-        while (buildLevels()) {
-            System.arraycopy(head, 0, currentArc, 0, nodeCount);
+        while (buildLayeredNetwork()) {
+            System.arraycopy(head, 0, currentEdge, 0, nodeCount);
             int pushed;
             do {
-                pushed = pushPathInLevels();
+                pushed = pushPathInLayeredNetwork();
                 value += pushed;
             } while (pushed > 0);
         }
@@ -188,102 +182,103 @@ public final class FlowNetwork {
      *
      * @return false if the sink cannot be reached
      */
-    private boolean buildLevels() {
-        Arrays.fill(level, -1);
+    private boolean buildLayeredNetwork() {
+        Arrays.fill(distance, -1);
         int front = 0;
         int back = 0;
         queue[back++] = source;
-        level[source] = 0;
+        distance[source] = 0;
         while (front < back) {
             int u = queue[front++];
-            if (level[sink] >= 0 && level[u] >= level[sink]) {
+            if (distance[sink] >= 0 && distance[u] >= distance[sink]) {
                 break;
             }
             for (int a = head[u]; a >= 0; a = next[a]) {
                 int v = to[a];
-                if (level[v] < 0 && cap[a] - flow[a] > 0) {
-                    level[v] = level[u] + 1;
+                if (distance[v] < 0 && cap[a] - flow[a] > 0) {
+                    distance[v] = distance[u] + 1;
                     queue[back++] = v;
                 }
             }
         }
-        return level[sink] >= 0;
+        return distance[sink] >= 0;
     }
 
     /**
-     * Finds one source-sink path in the layered network and pushes its
-     * bottleneck along it. The search is iterative (paths in a large grid can
-     * be long) and advances each node's current arc past arcs that are full
-     * or lead to a dead end, so over one phase every arc is skipped at most
-     * once (slide 232). A dead-end node is removed from the layers.
+     * Finds one s-t path in the layered residual network and adds the
+     * smallest residual capacity on it to the flow (slide 232). The search
+     * is iterative (paths in a large grid can be long) and advances each
+     * node's current edge past edges that are saturated or lead to a dead
+     * end, so over one round every edge is skipped at most once. A dead end
+     * is removed from the layered residual network.
      *
-     * @return the amount pushed, or 0 if the flow in the layers is blocking
+     * @return the amount pushed, or 0 if the flow is a blocking flow
      */
-    private int pushPathInLevels() {
+    private int pushPathInLayeredNetwork() {
         int depth = 0;
         int u = source;
         while (true) {
             if (u == sink) {
-                int bottleneck = Integer.MAX_VALUE;
+                int smallest = Integer.MAX_VALUE;
                 for (int i = 0; i < depth; i++) {
-                    int a = pathArc[i];
-                    bottleneck = Math.min(bottleneck, cap[a] - flow[a]);
+                    int a = pathEdge[i];
+                    smallest = Math.min(smallest, cap[a] - flow[a]);
                 }
                 for (int i = 0; i < depth; i++) {
-                    push(pathArc[i], bottleneck);
+                    push(pathEdge[i], smallest);
                 }
-                return bottleneck;
+                return smallest;
             }
-            // Advance u's current arc to the next usable arc of the layers.
-            int a = currentArc[u];
-            while (a >= 0 && (level[to[a]] != level[u] + 1 || cap[a] - flow[a] <= 0)) {
+            // Advance u's current edge to the next usable edge of the layered residual network.
+            int a = currentEdge[u];
+            while (a >= 0 && (distance[to[a]] != distance[u] + 1 || cap[a] - flow[a] <= 0)) {
                 a = next[a];
             }
-            currentArc[u] = a;
+            currentEdge[u] = a;
             if (a >= 0) {
-                pathArc[depth++] = a;
+                pathEdge[depth++] = a;
                 u = to[a];
             } else {
-                // Dead end: drop u from the layers and step back.
+                // Dead end: remove u from the layered residual network and step back.
                 if (u == source) {
                     return 0;
                 }
-                level[u] = -1;
-                int back = pathArc[--depth];
+                distance[u] = -1;
+                int back = pathEdge[--depth];
                 u = to[back ^ 1];
-                currentArc[u] = next[currentArc[u]];
+                currentEdge[u] = next[currentEdge[u]];
             }
         }
     }
 
     /**
-     * Ford-Fulkerson (22 Oct, slide 203) restricted to augmenting paths that
-     * start with the given arc out of the source.
-     * This is enough after one source arc has been added to a network whose
+     * The Ford/Fulkerson algorithm (22 Oct, slide 203) restricted to s-t
+     * paths that start with the given edge out of the source.
+     * This is enough after one source edge has been added to a network whose
      * flow was already maximum. Let X be the nodes the source could reach
-     * before. No residual arc left X, otherwise the flow would not have been
-     * maximum. A simple augmenting path that entered X could therefore never
-     * leave it again, so every augmenting path, now and after each later
-     * augmentation, starts with the new arc and stays outside X. Searching
-     * from the head of that arc finds them all, and the breadth-first search
+     * before. No residual edge left X, otherwise the flow would not have been
+     * maximum. An s-t path in the residual network that entered X could
+     * therefore never leave it again, so every such path, now and after
+     * each later round, starts with the new edge and stays outside X. Searching
+     * from the head of that edge finds them all, and the breadth first search
      * stops as soon as it meets the sink, so it usually only looks at the
      * part of the grid around the new emitter instead of the whole network.
      *
-     * @param startArc a forward arc leaving the source
-     * @return the maximum flow value
+     * @param startEdge a forward edge leaving the source
+     * @return the value of the maximum flow
      */
-    public int augmentFrom(int startArc) {
-        return augmentFrom(startArc, null);
+    public int augmentFrom(int startEdge) {
+        return augmentFrom(startEdge, null);
     }
 
     /**
-     * As augmentFrom(startArc), but the search may only visit nodes marked in
+     * As augmentFrom(startEdge), but the search may only visit nodes marked in
      * allowed (null allows all). With a restriction the result is a valid flow
      * that may be below the maximum; it is used for quick estimates.
      */
-    public int augmentFrom(int startArc, boolean[] allowed) {
-        int start = to[startArc];
-        while (cap[startArc] - flow[startArc] > 0) {
+    public int augmentFrom(int startEdge, boolean[] allowed) {
+        int start = to[startEdge];
+        while (cap[startEdge] - flow[startEdge] > 0) {
             int stamp = ++visitStamp[0];
             int front = 0;
             int back = 0;
@@ -298,7 +293,7 @@ public final class FlowNetwork {
                     if (visitMark[v] != stamp && cap[a] - flow[a] > 0
                             && (allowed == null || allowed[v])) {
                         visitMark[v] = stamp;
-                        parentArc[v] = a;
+                        parentEdge[v] = a;
                         if (v == sink) {
                             found = true;
                             break;
@@ -310,30 +305,30 @@ public final class FlowNetwork {
             if (!found) {
                 break;
             }
-            // Arcs between grid nodes have capacity 1, so one unit is the
-            // bottleneck of the path.
-            for (int v = sink; v != start; v = to[parentArc[v] ^ 1]) {
-                push(parentArc[v], 1);
+            // Edges between grid nodes have capacity 1, so the smallest
+            // residual capacity on the path is one unit.
+            for (int v = sink; v != start; v = to[parentEdge[v] ^ 1]) {
+                push(parentEdge[v], 1);
             }
-            push(startArc, 1);
+            push(startEdge, 1);
             value += 1;
         }
         return value;
     }
 
     /**
-     * The mirror image of augmentFrom: Ford-Fulkerson restricted to
-     * augmenting paths that end with the given arc into the sink. The search
-     * runs backwards from the tail of that arc to the source and stops when
+     * The mirror image of augmentFrom: the Ford/Fulkerson algorithm restricted
+     * to s-t paths that end with the given edge into the sink. The search
+     * runs backwards from the tail of that edge to the source and stops when
      * it gets there.
      *
-     * @param endArc a forward arc entering the sink
+     * @param endEdge a forward edge entering the sink
      * @return true if at least one unit was pushed
      */
-    public boolean augmentInto(int endArc) {
-        int end = to[endArc ^ 1];
+    public boolean augmentInto(int endEdge) {
+        int end = to[endEdge ^ 1];
         boolean pushedAny = false;
-        while (cap[endArc] - flow[endArc] > 0) {
+        while (cap[endEdge] - flow[endEdge] > 0) {
             int stamp = ++visitStamp[0];
             int front = 0;
             int back = 0;
@@ -343,14 +338,14 @@ public final class FlowNetwork {
             boolean found = false;
             while (front < back && !found) {
                 int v = queue[front++];
-                // Arc u -> v is usable if it has residual capacity; it is the
-                // partner of the arc r stored at v.
+                // Edge u -> v is usable if it has residual capacity; it is the
+                // partner of the edge r stored at v.
                 for (int r = head[v]; r >= 0; r = next[r]) {
                     int a = r ^ 1;
                     int u = to[r];
                     if (visitMark[u] != stamp && cap[a] - flow[a] > 0) {
                         visitMark[u] = stamp;
-                        parentArc[u] = a; // the arc leaving u towards the end
+                        parentEdge[u] = a; // the edge leaving u towards the end
                         if (u == source) {
                             found = true;
                             break;
@@ -362,49 +357,49 @@ public final class FlowNetwork {
             if (!found) {
                 break;
             }
-            int bottleneck = cap[endArc] - flow[endArc];
-            for (int u = source; u != end; u = to[parentArc[u]]) {
-                int a = parentArc[u];
-                bottleneck = Math.min(bottleneck, cap[a] - flow[a]);
+            int smallest = cap[endEdge] - flow[endEdge];
+            for (int u = source; u != end; u = to[parentEdge[u]]) {
+                int a = parentEdge[u];
+                smallest = Math.min(smallest, cap[a] - flow[a]);
             }
-            for (int u = source; u != end; u = to[parentArc[u]]) {
-                push(parentArc[u], bottleneck);
+            for (int u = source; u != end; u = to[parentEdge[u]]) {
+                push(parentEdge[u], smallest);
             }
-            push(endArc, bottleneck);
-            value += bottleneck;
+            push(endEdge, smallest);
+            value += smallest;
             pushedAny = true;
         }
         return pushedAny;
     }
 
     /**
-     * Removes one unit of flow that passes through the given forward arc,
+     * Removes one unit of flow that passes through the given forward edge,
      * keeping flow conservation everywhere else. The unit is traced forwards
      * to the sink and backwards to the source (or round a cycle back to the
-     * arc) and every arc on the way loses one unit.
+     * edge) and every edge on the way loses one unit.
      * This is how the network reacts when a node that carries a pulse becomes
      * an emitter, or an emitter is removed: the affected pulse is cancelled
      * and the next maximise call is free to find a new route.
      *
-     * @return the source arc the cancelled unit started from, or -1 if the
+     * @return the source edge the cancelled unit started from, or -1 if the
      *         unit went round a cycle
      */
-    public int cancelOneUnit(int arc) {
-        if (flow[arc] <= 0) {
-            throw new IllegalStateException("arc carries no flow");
+    public int cancelOneUnit(int edge) {
+        if (flow[edge] <= 0) {
+            throw new IllegalStateException("edge carries no flow");
         }
-        push(arc, -1);
-        int tail = to[arc ^ 1];
+        push(edge, -1);
+        int tail = to[edge ^ 1];
 
         // Forwards: the head now receives one unit less than it sends.
-        int v = to[arc];
+        int v = to[edge];
         boolean closedCycle = false;
         while (v != sink) {
             if (v == tail) {
                 closedCycle = true;
                 break;
             }
-            int out = outgoingFlowArc(v);
+            int out = outgoingFlowEdge(v);
             push(out, -1);
             v = to[out];
         }
@@ -413,21 +408,21 @@ public final class FlowNetwork {
         if (closedCycle) {
             return -1;
         }
-        int startArc = arc;
+        int startEdge = edge;
         int u = tail;
         while (u != source) {
-            startArc = incomingFlowArc(u);
-            push(startArc, -1);
-            u = to[startArc ^ 1];
+            startEdge = incomingFlowEdge(u);
+            push(startEdge, -1);
+            u = to[startEdge ^ 1];
         }
         value -= 1;
-        return startArc;
+        return startEdge;
     }
 
-    private void push(int arc, int amount) {
-        record(arc, amount);
-        flow[arc] += amount;
-        flow[arc ^ 1] -= amount;
+    private void push(int edge, int amount) {
+        record(edge, amount);
+        flow[edge] += amount;
+        flow[edge ^ 1] -= amount;
     }
 
     /**
@@ -451,12 +446,12 @@ public final class FlowNetwork {
     /** Undoes every change since beginTrial and stops recording. */
     public void rollback() {
         for (int i = trailSize - 1; i >= 0; i--) {
-            int arc = trailArc[i];
-            if (arc >= 0) {
-                flow[arc] -= trailValue[i];
-                flow[arc ^ 1] += trailValue[i];
+            int edge = trailEdge[i];
+            if (edge >= 0) {
+                flow[edge] -= trailValue[i];
+                flow[edge ^ 1] += trailValue[i];
             } else {
-                cap[~arc] = trailValue[i];
+                cap[~edge] = trailValue[i];
             }
         }
         trailSize = -1;
@@ -464,7 +459,7 @@ public final class FlowNetwork {
     }
 
     /**
-     * Adds to mark every node at either end of an arc whose flow changed
+     * Adds to mark every node at either end of an edge whose flow changed
      * since beginTrial, and returns the nodes that were newly marked so the
      * caller can clear them again.
      */
@@ -472,11 +467,11 @@ public final class FlowNetwork {
         int[] added = new int[2 * Math.max(trailSize, 0)];
         int count = 0;
         for (int i = 0; i < trailSize; i++) {
-            int arc = trailArc[i];
-            if (arc < 0) {
+            int edge = trailEdge[i];
+            if (edge < 0) {
                 continue; // a capacity change, not a flow change
             }
-            for (int v : new int[] {to[arc], to[arc ^ 1]}) {
+            for (int v : new int[] {to[edge], to[edge ^ 1]}) {
                 if (!mark[v]) {
                     mark[v] = true;
                     added[count++] = v;
@@ -486,21 +481,21 @@ public final class FlowNetwork {
         return Arrays.copyOf(added, count);
     }
 
-    private void record(int arc, int amount) {
+    private void record(int edge, int amount) {
         if (trailSize < 0) {
             return; // not in a trial
         }
-        if (trailSize == trailArc.length) {
-            trailArc = Arrays.copyOf(trailArc, 2 * trailSize);
+        if (trailSize == trailEdge.length) {
+            trailEdge = Arrays.copyOf(trailEdge, 2 * trailSize);
             trailValue = Arrays.copyOf(trailValue, 2 * trailSize);
         }
-        trailArc[trailSize] = arc;
+        trailEdge[trailSize] = edge;
         trailValue[trailSize] = amount;
         trailSize++;
     }
 
-    /** A forward arc leaving u that carries positive flow. */
-    private int outgoingFlowArc(int u) {
+    /** A forward edge leaving u that carries positive flow. */
+    private int outgoingFlowEdge(int u) {
         for (int a = head[u]; a >= 0; a = next[a]) {
             if ((a & 1) == 0 && flow[a] > 0) {
                 return a;
@@ -509,8 +504,8 @@ public final class FlowNetwork {
         throw new IllegalStateException("flow conservation violated");
     }
 
-    /** A forward arc entering u that carries positive flow. */
-    private int incomingFlowArc(int u) {
+    /** A forward edge entering u that carries positive flow. */
+    private int incomingFlowEdge(int u) {
         for (int a = head[u]; a >= 0; a = next[a]) {
             if ((a & 1) == 1 && flow[a ^ 1] > 0) {
                 return a ^ 1;
@@ -522,7 +517,7 @@ public final class FlowNetwork {
     /**
      * Marks every node that can still reach the sink in the residual network.
      * After a maximum flow this is the sink side of a minimum cut
-     * (max-flow min-cut theorem, 23 Oct, slides 215-219).
+     * (Max-Flow Min-Cut Theorem, 23 Oct, slides 215-219).
      */
     public boolean[] canReachSink() {
         return canReach(sink);
@@ -530,7 +525,7 @@ public final class FlowNetwork {
 
     /**
      * Marks every node that can reach target in the residual network by a
-     * path that does not pass through the sink (a backward breadth-first
+     * path that does not pass through the sink (a backward breadth first
      * search from target).
      */
     public boolean[] canReach(int target) {
@@ -541,8 +536,8 @@ public final class FlowNetwork {
         reach[target] = true;
         while (front < back) {
             int v = queue[front++];
-            // An arc u -> v is usable if it has residual capacity; its reverse
-            // arc (stored at v) points back to u.
+            // An edge u -> v is usable if it has residual capacity; its reverse
+            // edge (stored at v) points back to u.
             for (int r = head[v]; r >= 0; r = next[r]) {
                 int a = r ^ 1;
                 int u = to[r];

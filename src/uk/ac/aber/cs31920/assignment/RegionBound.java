@@ -25,7 +25,7 @@ import java.util.List;
  * parasite: start with the free nodes near it and, if they really must hold
  * an emitter, drop nodes (highest degree first) for as long as the rest still
  * must. Every test is a maximum flow (Dinitz, 28 Oct, slides 229-234, and
- * Ford-Fulkerson from one new source, 22 Oct, slide 203).
+ * the Ford/Fulkerson algorithm from one new source, 22 Oct, slide 203).
  */
 public final class RegionBound {
 

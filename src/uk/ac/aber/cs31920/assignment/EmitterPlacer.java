@@ -16,13 +16,14 @@ import java.util.List;
  *    parasite-free neighbours. (If a parasite fails this, no placement can
  *    work, because each pulse enters it through a different edge from a
  *    non-parasite node.)
- * 2. Forced emitters and a lower bound: some free nodes must hold an
+ * 2. Forced emitters and the lower bound module: some free nodes must hold an
  *    emitter in every solution (see forcedEmitters). One emitter sends at most
  *    degree(v) <= 8 pulses, and every parasite still short of pulses needs an
  *    emitter among its helpers, which gives the lower bound (see lowerBound).
- * 3. Upper bound: starting from the forced emitters, a greedy construction
- *    keeps adding the emitter that delivers the most extra pulses (ranked
- *    with a quick local estimate, then checked exactly). A local search
+ * 3. Upper bound module (14 Oct, slide 117): starting from the forced
+ *    emitters, a constructive heuristic keeps adding the emitter that
+ *    delivers the most extra pulses (ranked with a quick local estimate,
+ *    then checked exactly). A local search
  *    (14 Oct, slide 110) then removes emitters that are no longer needed,
  *    and an iterated local search (14 Oct, slides 109-110, see
  *    RelocationSearch) moves emitters around to look for a placement with
@@ -30,14 +31,16 @@ import java.util.List;
  * 4. If the best placement is still above the lower bound, the bound is
  *    raised with a relaxation (see RegionBound).
  * 5. Branch and bound (14 Oct, slides 117-118), seeded with the best
- *    placement so far as the incumbent (slide 119): it keeps asking for a
- *    working set with one emitter fewer. A branch is cut off when the pulses
- *    still missing need more emitters than are left, or when the nodes ruled
- *    out so far leave too little room even in a relaxed network. Each node
- *    branches on the helpers of one short parasite (PulseNetwork.helpersOf),
- *    one of which is in every completion by the minimum cut argument, so the
- *    cut-down choice loses no solution. When a search ends without finding a smaller set, or the best
- *    set meets the lower bound, the answer is proven optimal.
+ *    placement so far as the best known upper bound (slide 119): it keeps
+ *    asking for a working set with one emitter fewer. A problem variant is
+ *    dropped when its lower bound is not better than the best known upper
+ *    bound: when the pulses still missing need more emitters than are left,
+ *    or when the nodes ruled out so far leave too little room even in a
+ *    relaxed network. Each problem variant is restricted further using the
+ *    helpers of one short parasite (PulseNetwork.helpersOf), one of which is
+ *    in every completion by the minimum cut argument, so no solution is lost.
+ *    When a search ends without finding a smaller set, or the best set meets
+ *    the lower bound, the answer is proven optimal.
  * Every candidate set is checked with the maximum flow in PulseNetwork, so any
  * placement this class returns is guaranteed to work.
  * The brief asks for the smallest possible number of emitters, so by default
@@ -48,8 +51,8 @@ import java.util.List;
  */
 public final class EmitterPlacer {
 
-    /** Candidates estimated per greedy step. */
-    private static final int GREEDY_CANDIDATES = 40;
+    /** Candidates estimated per step of the constructive heuristic. */
+    private static final int CONSTRUCTIVE_CANDIDATES = 40;
     /** Of those, how many of the best estimates are then checked exactly. */
     private static final int EXACT_CHECKS = 4;
     /** Moves the iterated local search may try for each smaller size. */
@@ -108,11 +111,11 @@ public final class EmitterPlacer {
         lower = Math.max(emittersNeeded(instance.totalDemand()),
             forced.size() + emittersNeeded(start.deficit()));
 
-        List<Integer> greedy = greedy(start);
+        List<Integer> constructed = constructiveHeuristic(start);
         // The time budget covers the improvement steps that follow.
         long now = System.currentTimeMillis();
         deadline = budgetMillis >= Long.MAX_VALUE - now ? Long.MAX_VALUE : now + budgetMillis;
-        List<Integer> best = localSearch(greedy);
+        List<Integer> best = localSearch(constructed);
 
         // Iterated local search: while it keeps finding a working placement
         // with one emitter fewer, take it.
@@ -218,12 +221,13 @@ public final class EmitterPlacer {
     }
 
     /**
-     * Step 3a: greedy construction. Each round looks at the free nodes allowed
-     * by the minimum cut argument, ranks them by how many of their edges could
+     * Step 3a: constructive heuristic, the upper bound module (14 Oct,
+     * slide 117). Each step looks at the free nodes allowed by the minimum
+     * cut argument, ranks them by how many of their edges could
      * still carry a pulse to a parasite, tries the best few for real and keeps
      * the one that delivers the most extra pulses.
      */
-    private List<Integer> greedy(PulseNetwork start) {
+    private List<Integer> constructiveHeuristic(PulseNetwork start) {
         PulseNetwork network = start.copy();
         List<Integer> emitters = new ArrayList<>(forced);
         while (!network.isFeasible()) {
@@ -314,7 +318,7 @@ public final class EmitterPlacer {
     }
 
     /**
-     * Step 5: depth-first branch and bound for a working set of at most k
+     * Step 5: depth first branch and bound for a working set of at most k
      * emitters that includes the forced ones.
      *
      * @return the emitters, or null if none exists (or the time ran out)
@@ -329,7 +333,8 @@ public final class EmitterPlacer {
     }
 
     /**
-     * One node of the search tree.
+     * One problem variant: a restriction of the set of possible solutions
+     * (14 Oct, slide 117).
      *
      * @param network   the flow network with the emitters in chosen placed
      * @param k         the number of emitters allowed in total
@@ -487,7 +492,7 @@ public final class EmitterPlacer {
     /**
      * Free nodes allowed by the minimum cut argument, ordered so the most
      * promising come first: more edges that could carry a new pulse, then
-     * closer to a parasite. Returns at most GREEDY_CANDIDATES nodes.
+     * closer to a parasite. Returns at most CONSTRUCTIVE_CANDIDATES nodes.
      */
     private List<Integer> rankedCandidates(PulseNetwork network, boolean[] reach) {
         boolean[] useful = network.usefulNextEmitters(reach);
@@ -504,15 +509,15 @@ public final class EmitterPlacer {
                 .comparingInt((Integer v) -> score[v]).reversed()
                 .thenComparingInt(v -> parasiteDistance[v])
                 .thenComparingInt(Integer::intValue));
-        if (candidates.size() > GREEDY_CANDIDATES) {
-            return new ArrayList<>(candidates.subList(0, GREEDY_CANDIDATES));
+        if (candidates.size() > CONSTRUCTIVE_CANDIDATES) {
+            return new ArrayList<>(candidates.subList(0, CONSTRUCTIVE_CANDIDATES));
         }
         return candidates;
     }
 
     /**
      * Distance max(|dx|, |dy|) from every node to its nearest parasite, in
-     * coordinate units. Computed once by a breadth-first search from all
+     * coordinate units. Computed once by a breadth first search from all
      * parasites at once over the (2l+1) x (2l+1) coordinate square with king
      * moves, which takes O(N) time, instead of comparing every candidate with
      * every parasite in every search node (O(N * P) each time).
