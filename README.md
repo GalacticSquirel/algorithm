@@ -13,9 +13,7 @@ javac -d out src/uk/ac/aber/cs31920/assignment/*.java
 java -cp out uk.ac.aber.cs31920.assignment.MySolution inputs/input01.txt inputs/input02.txt
 ```
 
-Each input file gives one output line. Add `-Dverbose=1` before `-cp` to print the
-runtime, emitter count, lower bound and whether the answer is proven optimal to
-standard error.
+Each input file gives one output line.
 
 Only the Java Collections Framework is used.
 
@@ -73,9 +71,7 @@ line (zero emitters). If a node is listed twice, the later line counts.
    fewer than the bound from step 3, or when the nodes ruled out so far leave too little
    room even in the relaxed network.
    It always runs until the answer
-   is proven minimal, as the brief requires. For experiments, `-Dbudget=1000` caps
-   local search and branch and bound at 1000 ms per input; the best valid placement
-   found so far is then printed, without a guarantee that it is minimal.
+   is proven minimal, as the brief requires.
 
 ## Complexity
 
