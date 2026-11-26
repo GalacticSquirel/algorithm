@@ -43,11 +43,9 @@ import java.util.List;
  *    the lower bound, the answer is proven optimal.
  * Every candidate set is checked with the maximum flow in PulseNetwork, so any
  * placement this class returns is guaranteed to work.
- * The brief asks for the smallest possible number of emitters, so by default
- * the search runs until the answer is proven optimal, however long that takes
- * (it is exponential in the worst case). An optional time budget can be set
- * for experiments; if it runs out, the best placement found so far is
- * returned, which is valid but not proven optimal.
+ * The brief asks for the smallest possible number of emitters, so the search
+ * runs until the answer is proven optimal, however long that takes (it is
+ * exponential in the worst case).
  */
 public final class EmitterPlacer {
 
@@ -60,31 +58,28 @@ public final class EmitterPlacer {
 
     private final Instance instance;
     private final Grid grid;
-    private final long budgetMillis;
     /** The most pulses one emitter can send: the largest degree of a free node (8 on most grids). */
     private final int maxEmitterPulses;
     /** parasiteDistance[v]: distance from v to the nearest parasite (for ordering only). */
     private final int[] parasiteDistance;
     // Set by solve().
-    private long deadline;
-    private boolean timedOut;
-    private boolean provenOptimal;
     private List<Integer> forced = new ArrayList<>();
+    /**
+     * The lower bound. Step 2 gives the larger of ceil(total demand / most
+     * pulses one emitter can send) and the number of forced emitters plus the
+     * bound of emittersNeededFor for the pulses they cannot deliver. Step 4
+     * may raise it further (RegionBound).
+     */
     private int lower;
 
     /** A candidate emitter together with the extra pulses it (would) deliver. */
     private record Candidate(int node, int gain) {
     }
 
-    /**
-     * @param instance     the instance to solve
-     * @param budgetMillis time allowed for local search and branch and bound,
-     *                     or Long.MAX_VALUE for no limit
-     */
-    public EmitterPlacer(Instance instance, long budgetMillis) {
+    /** @param instance the instance to solve */
+    public EmitterPlacer(Instance instance) {
         this.instance = instance;
         this.grid = instance.grid();
-        this.budgetMillis = budgetMillis;
         int best = 0;
         for (int v = 0; v < grid.nodeCount(); v++) {
             if (!instance.hasParasite(v)) {
@@ -102,7 +97,6 @@ public final class EmitterPlacer {
      * @return the emitter nodes, or null if the instance has no solution
      */
     public List<Integer> solve() {
-        timedOut = false;
         if (!isSolvable()) {
             return null;
         }
@@ -111,16 +105,12 @@ public final class EmitterPlacer {
         lower = Math.max(emittersNeeded(instance.totalDemand()),
             forced.size() + emittersNeeded(start.deficit()));
 
-        List<Integer> constructed = constructiveHeuristic(start);
-        // The time budget covers the improvement steps that follow.
-        long now = System.currentTimeMillis();
-        deadline = budgetMillis >= Long.MAX_VALUE - now ? Long.MAX_VALUE : now + budgetMillis;
-        List<Integer> best = localSearch(constructed);
+        List<Integer> best = localSearch(constructiveHeuristic(start));
 
         // Iterated local search: while it keeps finding a working placement
         // with one emitter fewer, take it.
         RelocationSearch relocation = new RelocationSearch(instance, forced);
-        while (best.size() > lower && System.currentTimeMillis() <= deadline) {
+        while (best.size() > lower) {
             List<Integer> smaller = relocation.search(best, RELOCATION_MOVES);
             if (smaller == null) {
                 break;
@@ -139,26 +129,18 @@ public final class EmitterPlacer {
         // Branch and bound: keep asking for a placement with one emitter fewer
         // than the best so far. When a search finishes without finding one,
         // the best placement is optimal.
-        provenOptimal = best.size() == lower;
-        while (!provenOptimal && !timedOut) {
+        while (best.size() > lower) {
             List<Integer> smaller = branchAndBound(start, best.size() - 1);
-            if (smaller != null) {
-                best = smaller;
-                provenOptimal = best.size() == lower;
-            } else if (!timedOut) {
-                provenOptimal = true;
+            if (smaller == null) {
+                break;
             }
+            best = smaller;
         }
         return best;
     }
 
-    /** True if the last call to solve proved that its answer is optimal. */
-    public boolean provenOptimal() {
-        return provenOptimal;
-    }
-
     /** Step 1: the exact test described in the class comment. */
-    public boolean isSolvable() {
+    private boolean isSolvable() {
         for (int p : instance.parasites()) {
             int freeNeighbours = 0;
             for (int w : grid.neighbours(p)) {
@@ -171,16 +153,6 @@ public final class EmitterPlacer {
             }
         }
         return true;
-    }
-
-    /**
-     * The lower bound worked out by solve(). Step 2 gives the larger of
-     * ceil(total demand / most pulses one emitter can send) and the number of
-     * forced emitters plus the bound of emittersNeededFor for the pulses they
-     * cannot deliver. Step 4 may raise it further (RegionBound).
-     */
-    public int lowerBound() {
-        return lower;
     }
 
     /**
@@ -286,9 +258,6 @@ public final class EmitterPlacer {
         while (improved) {
             improved = false;
             for (int i = 0; i < current.size(); i++) {
-                if (System.currentTimeMillis() > deadline) {
-                    return current; // out of time; current is still valid
-                }
                 // Quick necessary condition: the others must have room for
                 // the pulses this emitter sends now.
                 int v = current.get(i);
@@ -321,7 +290,7 @@ public final class EmitterPlacer {
      * Step 5: depth first branch and bound for a working set of at most k
      * emitters that includes the forced ones.
      *
-     * @return the emitters, or null if none exists (or the time ran out)
+     * @return the emitters, or null if none exists
      */
     private List<Integer> branchAndBound(PulseNetwork start, int k) {
         List<Integer> chosen = new ArrayList<>(forced);
@@ -346,10 +315,6 @@ public final class EmitterPlacer {
     private boolean search(PulseNetwork network, int k, List<Integer> chosen, boolean[] forbidden) {
         if (network.isFeasible()) {
             return true;
-        }
-        if (System.currentTimeMillis() > deadline) {
-            timedOut = true;
-            return false;
         }
         int left = k - chosen.size();
         int deficit = network.deficit();
@@ -401,9 +366,6 @@ public final class EmitterPlacer {
                 break;
             }
             chosen.removeLast();
-            if (timedOut) {
-                break;
-            }
             forbidden[v] = true;
             excluded.add(v);
         }

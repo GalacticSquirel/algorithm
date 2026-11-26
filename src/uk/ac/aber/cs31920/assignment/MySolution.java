@@ -12,37 +12,19 @@ import java.util.List;
  */
 public final class MySolution {
 
-    /**
-     * Time the improvement steps may spend on one input, in milliseconds. The
-     * brief requires the fewest emitters, so there is no limit unless one is
-     * asked for with -Dbudget=milliseconds (only meant for experiments).
-     */
-    private static final long SEARCH_BUDGET_MILLIS = Long.getLong("budget", Long.MAX_VALUE);
-
     private MySolution() {
     }
 
     public static void main(String[] args) {
-        boolean verbose = System.getProperty("verbose") != null;
         for (String fileName : args) {
-            long start = System.nanoTime();
             String line;
-            String note = "";
             try {
                 Instance instance = Instance.read(fileName);
-                EmitterPlacer placer = new EmitterPlacer(instance, SEARCH_BUDGET_MILLIS);
-                List<Integer> emitters = placer.solve();
+                List<Integer> emitters = new EmitterPlacer(instance).solve();
                 line = emitters == null ? "no solution" : format(instance.grid(), emitters);
-                if (verbose && emitters != null) {
-                    note = " [" + emitters.size() + " emitter(s), lower bound " + placer.lowerBound()
-                        + (placer.provenOptimal() ? ", optimal" : ", not proven optimal") + "]";
-                }
             } catch (IOException e) {
                 // A file that cannot be opened or read counts as having no solution.
                 line = "no solution";
-                if (verbose) {
-                    System.err.println(fileName + ": " + e.getMessage());
-                }
             } catch (RuntimeException e) {
                 // Should never happen. Report it on standard error, so that it
                 // is not hidden, and still answer every remaining file.
@@ -50,10 +32,6 @@ public final class MySolution {
                 e.printStackTrace();
             }
             System.out.println(line);
-            if (verbose) {
-                long millis = (System.nanoTime() - start) / 1_000_000;
-                System.err.println(fileName + ": " + millis + " ms" + note);
-            }
         }
     }
 
