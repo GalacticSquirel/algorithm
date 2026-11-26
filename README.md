@@ -13,7 +13,8 @@ javac -d out src/uk/ac/aber/cs31920/assignment/*.java
 java -cp out uk.ac.aber.cs31920.assignment.MySolution inputs/input01.txt inputs/input02.txt
 ```
 
-Each input file gives one output line.
+The only arguments are the input file names. Each input file gives one output
+line, in the order the files are given.
 
 Only the Java Collections Framework is used.
 
